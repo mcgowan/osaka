@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Raw market data (never committed - large, licensed)
+data/raw/
+
+# macOS
+.DS_Store
