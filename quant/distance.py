@@ -45,7 +45,7 @@ def snap(K, increment=STRIKE_INCREMENT):
     return round(K / increment) * increment
 
 
-def place_grid(S, sigma, T, side, anchors=GRID_ANCHORS):
+def place_grid(S, sigma, T, side, anchors=None):
     """Grid strikes for one (bar, side): [(anchor, strike, actual_D), ...].
 
     Strikes are snapped; actual_D is the snapped strike's true distance —
@@ -61,6 +61,8 @@ def place_grid(S, sigma, T, side, anchors=GRID_ANCHORS):
     2026-06-11.) Callers must tolerate len(result) < len(anchors) late in
     the session.
     """
+    if anchors is None:
+        anchors = GRID_ANCHORS[side]
     out = []
     for a in anchors:
         K = snap(strike_for_distance(a, S, sigma, T, side))

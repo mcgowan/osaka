@@ -19,11 +19,46 @@ YEAR_SECONDS = 365.0 * 24 * 3600
 SETTLE_FULL = time(16, 0)   # ET
 SETTLE_HALF = time(13, 0)   # ET (half-day sessions)
 
-# --- grid anchors (FR-4.1) -------------------------------------------------
-# Normalized-distance sampling targets, ~0.30/0.20/0.15/0.10/0.05
-# delta-equivalent region. Exact delta mapping documented by task 1.3.
-GRID_ANCHORS = (0.8, 1.0, 1.3, 1.6, 2.1)
+# --- grid anchors (FR-4.1, frozen by task 1.3) ------------------------------
+# Per-side normalized-distance sampling targets at the empirical median D of
+# the {0.30, 0.20, 0.15, 0.10, 0.05} delta levels, measured from 62
+# VIX1D-stratified recorded-chain days (analysis/delta_mapping.py;
+# docs/calibration.md). Side-asymmetric because put skew pushes equal-delta
+# strikes much farther out in implied-move units. NOTE: D values are bound
+# to THIS project's sigma convention (prior-close VIX1D + calendar-time
+# sqrt(T)) - they are not comparable to textbook d-values.
+GRID_ANCHORS = {
+    "p": (0.80, 1.35, 1.75, 2.30, 3.35),
+    "c": (0.75, 1.15, 1.40, 1.75, 2.40),
+}
 STRIKE_INCREMENT = 5.0
+
+# --- distance buckets (NFR-2.1, frozen by task 1.3) --------------------------
+# Per-side bucket edges: median D at the {0.05, 0.10, 0.15, 0.25} delta
+# levels. Band of record = the "10-15" bucket. Regime/time-of-day drift of
+# the mapping (~10-18% IQR) is documented bucket-assignment noise; edges are
+# deliberately FIXED (docs/calibration.md).
+BUCKET_EDGES_D = {  # side -> (D at 0.05, 0.10, 0.15, 0.25 delta)
+    "p": (3.363, 2.306, 1.729, 1.051),
+    "c": (2.380, 1.754, 1.407, 0.927),
+}
+BUCKET_LABELS = ("lt05", "05-10", "10-15", "15-25", "gt25")
+BAND_OF_RECORD = "10-15"
+
+
+def delta_bucket(D, side):
+    """Delta-equivalent bucket label for a normalized distance.
+    For ANALYSIS/EVALUATION slicing only - never a model feature."""
+    e05, e10, e15, e25 = BUCKET_EDGES_D[side]
+    if D > e05:
+        return "lt05"
+    if D > e10:
+        return "05-10"
+    if D > e15:
+        return "10-15"
+    if D > e25:
+        return "15-25"
+    return "gt25"
 
 # --- sigma anchor (FR-5.1 / task 1.4 decides final mode) -------------------
 # "prior_close" is the strictly point-in-time-safe default: available at

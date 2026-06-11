@@ -62,7 +62,7 @@ def test_snap():
 
 def test_place_grid_structure():
     grid = place_grid(S, SIGMA, T_3H, "p")
-    assert len(grid) == len(GRID_ANCHORS)
+    assert len(grid) == len(GRID_ANCHORS["p"])
     for anchor, K, actual_d in grid:
         assert K % 5 == 0
         assert K < S
@@ -72,6 +72,22 @@ def test_place_grid_structure():
         assert abs(actual_d - anchor) < 0.5  # snapped near the target
     strikes = [k for _, k, _ in grid]
     assert strikes == sorted(strikes, reverse=True)  # farther anchors, lower puts
+    # call grid mirrors above spot with its own anchors
+    cgrid = place_grid(S, SIGMA, T_3H, "c")
+    assert len(cgrid) == len(GRID_ANCHORS["c"])
+    assert all(k > S for _, k, _ in cgrid)
+
+
+def test_delta_bucket():
+    from quant.conventions import BAND_OF_RECORD, delta_bucket
+    # put edges: 3.363 / 2.306 / 1.729 / 1.051
+    assert delta_bucket(4.0, "p") == "lt05"
+    assert delta_bucket(2.5, "p") == "05-10"
+    assert delta_bucket(2.0, "p") == BAND_OF_RECORD
+    assert delta_bucket(1.2, "p") == "15-25"
+    assert delta_bucket(0.5, "p") == "gt25"
+    # side asymmetry: same D, different bucket
+    assert delta_bucket(2.0, "c") == "05-10"
 
 
 def test_place_grid_late_day_collisions_kept_itm_dropped():
@@ -79,7 +95,7 @@ def test_place_grid_late_day_collisions_kept_itm_dropped():
     # strikes (kept) and near anchors can snap onto/across spot (dropped)
     T = 5 * 60 / YEAR_SECONDS
     grid = place_grid(S, SIGMA, T, "p")
-    assert 0 < len(grid) <= len(GRID_ANCHORS)
+    assert 0 < len(grid) <= len(GRID_ANCHORS["p"])
     assert all(d > 0 for _, _, d in grid)  # never an at/through-spot row
     # verifier's minimal reproduction: put anchor snapping above spot
     repro = place_grid(6004, 0.12, 3 * 60 / YEAR_SECONDS, "p")

@@ -81,7 +81,7 @@ Initial feature budget: **20–30 features.** Additions require demonstrated imp
 4. No option pricing, σ path, or greek computation anywhere in this pipeline — labels depend only on the SPX bar series and K.
 
 ### FR-4: Strike grid placement (historical training rows)
-1. Training strikes are placed at fixed **normalized-distance anchors** from spot: D ∈ {0.8, 1.0, 1.3, 1.6, 2.1} remaining-implied-move units (σ√T·S, σ = VIX1D-based), i.e. K = S ∓ D·σ√T·S, snapped to the listed 5-pt increment. These anchors approximate the 0.30/0.20/0.15/0.10/0.05Δ region the trader actually quotes (exact mapping documented in Phase 1).
+1. Training strikes are placed at fixed **normalized-distance anchors** from spot, i.e. K = S ∓ D·σ√T·S snapped to the listed 5-pt increment, at the per-side anchor sets frozen by task 1.3 (`quant/conventions.py::GRID_ANCHORS`): puts {0.80, 1.35, 1.75, 2.30, 3.35}, calls {0.75, 1.15, 1.40, 1.75, 2.40} — the empirical median D of the 0.30/0.20/0.15/0.10/0.05Δ levels measured from 62 recorded-chain days (see `docs/calibration.md`). *(Amended from the draft single-sided anchors at Gate-S restructure time; put skew makes equal-delta put strikes sit much farther out in implied-move units.)*
 2. The snapped strike's actual normalized distance is what enters the feature row — anchors are sampling targets, not data values.
 3. Acceptance: on recorded-chain days, the grid's span must cover the chain's actual 0.05–0.30Δ strikes per side ≥ ~95% of (day × stride-bar) observations — i.e. the training distribution covers where live queries will land. (Pricing-accuracy acceptance is obsolete: nothing in the pipeline claims to price options.)
 
