@@ -12,7 +12,8 @@
 |---|---|
 | **S — Derived-Pricing Spike** | Tasks S.1–S.6 ✅ + addenda (stop-vs-touch gap; false-breakout economics). **Gate S ✅ passed 2026-06-11: trader chose the price-barrier restructure.** Labels = price facts; option pricing removed from the pipeline; delta-breach design shelved as v2. |
 | **0 — Data Foundation** | **All tasks ✅ (0.1–0.7). Gate 0 ready for trader review.** Late discovery: `eleuthera/events/` = 303 days of recorded chains; `eleuthera/analyzer/logs` = the 294-trade rule-behavior log. False-breakout cost measured: $77.6k over 301 days (`spike/memo.md` Addendum 2) — the project's economic case, quantified. |
-| **1–6** | Restructured at Gate S around price-barrier labels (Phase 1 = grid/baseline/validation; Phase 2 = touch/settle label engine). Not started. |
+| **1 — Grid, Baseline & Validation** | 1.1 ✅ 1.2 ✅ (`quant/`, math-verifier VERIFIED) · Open: 1.3 (distance↔delta mapping), 1.4 (baseline validation vs chains), 1.5 (grid coverage), 1.6 (exit characterization), 1.7 (sensitivity memo). |
+| **2–6** | Restructured at Gate S around price-barrier labels. Not started. |
 
 Data inventory: SPX 1-min 2004→, VIX 1-min 2005→, VIX1D 1-min 2023-04-26→ (all IB, $0, audited via `data/qa_ib.py`); SPX/VIX daily; trader's 2026-06-01 full-chain recording (502 contracts) + SPX/VIX charts in `data/raw/`. Canonical access: `data/loader.py`.
 
@@ -53,8 +54,8 @@ Data inventory: SPX 1-min 2004→, VIX 1-min 2005→, VIX1D 1-min 2023-04-26→ 
 
 **Goal:** The analytic framework around the price labels: strike-grid placement, the p_mkt no-touch baseline with documented bias, distance buckets, and the exit-rule characterization that links model output to overlay value.
 
-- [ ] **1.1** Implement the normalized-distance machinery behind the load API: D(K, S, σ, T), grid placement at the FR-4 anchors with 5-pt snapping, and the σ convention (VIX1D daily anchor; calendar-time √T). Unit tests.
-- [ ] **1.2** Implement analytic p_mkt: no-touch probability from (D, side, T) via the reflection-principle barrier formula, same σ convention. Unit-test against Monte Carlo GBM paths.
+- [x] **1.1** Implement the normalized-distance machinery behind the load API: D(K, S, σ, T), grid placement at the FR-4 anchors with 5-pt snapping, and the σ convention (VIX1D daily anchor; calendar-time √T). Unit tests. *(Done 2026-06-11 — `quant/distance.py` + `quant/conventions.py` (SigmaAnchor: prior_close default, day_open variant for 1.7). Math-verifier VERIFIED (round-trip 3.6e-13); its late-day finding fixed: snapped strikes at/across spot are dropped, not emitted as ITM rows.)*
+- [x] **1.2** Implement analytic p_mkt: no-touch probability from (D, side, T) via the reflection-principle barrier formula, same σ convention. Unit-test against Monte Carlo GBM paths. *(Done 2026-06-11 — `quant/pmkt.py`. Math-verifier VERIFIED: independent derivation agrees to 1.4e-14 rel; 300k-path MC within error after Broadie–Glasserman–Kou discrete-monitoring correction; monotonicity and put<call drift asymmetry confirmed. Tests: `tests/test_quant.py`, 11 tests incl. seeded MC.)*
 - [ ] **1.3** Document the distance↔delta mapping empirically: on recorded-chain days (`eleuthera/events/`), regress recorded deltas against D by side/regime/time-of-day. Fix the bucket boundaries (incl. band of record) in D units; record the delta-equivalent labels.
 - [ ] **1.4** Baseline validation (FR-5.1): compare analytic p_mkt against market-implied touch probability from recorded chains across ≥3 VIX1D regimes × ≥2 times of day. Decide: raw VIX1D anchor vs f(t)-corrected. Freeze the choice; document bias by regime/slice.
 - [ ] **1.5** Grid coverage acceptance (FR-4.3): grid spans the chains' actual 0.05–0.30Δ strikes ≥ ~95% of observations on recorded days. If failing: widen anchors, re-test.
