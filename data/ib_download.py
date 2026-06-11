@@ -77,7 +77,10 @@ GAP_THRESHOLD_BARS = 200 # days with 1..199 bars are suspected partial chunks
 # data/ib/README.md for confirmation queries and context.
 KNOWN_IB_HOLES = {
     "VIX": {"2011-05-27"},  # only 15:31-15:59 ET exist on IB
-    "SPX": set(),
+    "SPX": {
+        "2011-05-27",  # same hole as VIX: 28 bars, afternoon only
+        "2004-04-09",  # Good Friday (closed); IB has 1 junk bar
+    },
     "VIX1D": set(),
 }
 

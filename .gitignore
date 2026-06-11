@@ -222,3 +222,5 @@ data/raw/
 
 # macOS
 .DS_Store
+data/ib/*.csv
+data/processed/

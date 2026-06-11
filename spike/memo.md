@@ -92,6 +92,72 @@ Phase 1 m-stability analysis (task 1.3).
    of nearest-strike average; sub-minute spot (bar open was used); investigate the 06:35
    open snapshot separately (auction noise).
 
+## Addendum (2026-06-11): delta-breach vs touch vs settlement, measured
+
+Gate S decision input for the proposed price-barrier restructure
+(`spike/stop_vs_touch.py`, per-entry detail in `spike/stop_vs_touch.csv`).
+For 72 hypothetical entries on the recorded day (every 30 min × both sides ×
+{0.10, 0.15, 0.20}Δ chain strikes), using the chain's own recorded deltas:
+
+| Failure definition | Fired |
+|---|---|
+| A. delta reached 0.30 (δ\*-style stop) | 38/72 (53%) |
+| B. price touched the strike | 29/72 (40%) |
+| C. settled through the strike | 11/72 (15%) |
+
+- **9 of the 38 delta-breaches (24%) never touched the strike.** Under
+  price-barrier labels those are survivals; under a delta/credit stop they
+  are realized losses.
+- Where both fired, the delta stop preceded touch by ~30–120 minutes.
+- Context: a steady trend-up day (calls crushed, puts safe until a late
+  fade), VIX1D ≈ 10 (15th percentile — calm tercile). Entries share the same
+  underlying path, so effective N ≈ 1 day; treat magnitudes as illustrative,
+  the *structure* as confirmed.
+
+**Implication:** the A↔B gap is material, not theoretical. The decisive
+question for Gate S is where the trader's real exits sit between A and B —
+which is exactly what the trade-log digitization (task 0.6) will measure.
+If real exits cluster near touch, the price-barrier label is the trade's
+truth; if near the delta stop, the price-barrier model over-promises
+survival on trend days specifically.
+
+## Addendum 2 (2026-06-11): the trade log changes everything
+
+Two discoveries from the trader's system repo (`../eleuthera`):
+
+**1. A 303-day full-chain archive exists.** `eleuthera/events/` holds the
+trader's own recordings — every chain update (quotes + IB greeks), per
+strike, 2024-12-17 → 2026-06-05, 223 GB, same format as the single day in
+`data/raw/`, produced continuously by the system's `writer` module. FR-5's
+"thin chain coverage" risk is largely void: skew/vol-curve calibration has
+hundreds of days with true held-out testing, and ~60% of the VIX1D-era
+training universe has *recorded* deltas — for those days, delta-breach
+labels need no BS reconstruction at all. Coverage keeps growing daily.
+
+**2. The false-breakout cost is measured, and it is the project's economic
+case** (`spike/false_breakout_cost.py`, 294 backtested trades, 301 days,
+real recorded fills): the system's two early-exit rules
+(`risk_off_reversal`, `sr_inner_breach`) cost **$77,625** vs holding to
+settlement — against total strategy P&L of $136,725. 153/166 early exits
+would have been better held (the whipsaw tax: only 25–31% ever touched the
+short strike after exit); the other 13 were true breaks, including
+single-trade catastrophes of −$57.6k and −$31.1k that the exits correctly
+insured against. The model's job, stated precisely: at the moment an exit
+rule fires, discriminate the 153 from the 13 better than the market does.
+A perfect discriminator is worth ≈ +57% of strategy P&L; the kill criterion
+asks whether any of that is capturable beyond what delta already knows.
+
+Trade base rates for label sanity-checks (task 2.3): 294 spreads, 63% win,
+sides 167 bull / 127 bear; exits: 130 risk_off_reversal (41% win),
+128 expiration (100% win), 36 sr_inner_breach (14% win).
+
+## Gate S decision (2026-06-11)
+
+**Passed — trader approved the price-barrier restructure.** Labels are price
+facts (no-touch primary, settle-beyond secondary); option pricing removed
+from the v1 pipeline; the delta-breach/δ\* design shelved as a documented v2
+option. Requirements, plan, CLAUDE.md, and README rewritten accordingly.
+
 ## Caveats
 
 - Single day, calm regime (VIX ~16), m fit in-sample. This is a feasibility result, not

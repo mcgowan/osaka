@@ -4,7 +4,17 @@
 **Companion to:** Requirements Document v0.1
 **Structure:** A de-risking spike (Phase S) followed by 7 gated phases. Each phase has a gate — do not start the next phase until the gate passes. Phases 0–2 are deliberately front-loaded: most quant projects die from bad labels and leakage, not bad models, so the unglamorous work comes first.
 
-**Standing data constraint:** no options data is purchased. All option pricing is derived from SPX 1-min bars + VIX1D; the only real chains are the trader's own recordings.
+**Standing data constraint:** no options data is purchased. Labels are price facts from SPX 1-min bars (no option pricing in the pipeline, per Gate S); the only real chains are the trader's own recordings (`eleuthera/events/`), used for baseline validation and ablations only.
+
+## Status (as of 2026-06-11)
+
+| Phase | State |
+|---|---|
+| **S — Derived-Pricing Spike** | Tasks S.1–S.6 ✅ + addenda (stop-vs-touch gap; false-breakout economics). **Gate S ✅ passed 2026-06-11: trader chose the price-barrier restructure.** Labels = price facts; option pricing removed from the pipeline; delta-breach design shelved as v2. |
+| **0 — Data Foundation** | **All tasks ✅ (0.1–0.7). Gate 0 ready for trader review.** Late discovery: `eleuthera/events/` = 303 days of recorded chains; `eleuthera/analyzer/logs` = the 294-trade rule-behavior log. False-breakout cost measured: $77.6k over 301 days (`spike/memo.md` Addendum 2) — the project's economic case, quantified. |
+| **1–6** | Restructured at Gate S around price-barrier labels (Phase 1 = grid/baseline/validation; Phase 2 = touch/settle label engine). Not started. |
+
+Data inventory: SPX 1-min 2004→, VIX 1-min 2005→, VIX1D 1-min 2023-04-26→ (all IB, $0, audited via `data/qa_ib.py`); SPX/VIX daily; trader's 2026-06-01 full-chain recording (502 contracts) + SPX/VIX charts in `data/raw/`. Canonical access: `data/loader.py`.
 
 ---
 
@@ -19,7 +29,7 @@
 - [x] **S.5** Compare: error in strike points and in strike increments, per side, per delta level, per time of day. Compute the implied skew multiplier m = actual distance ÷ BS distance at each point — is it stable enough within the day to look calibratable? *(Done — m_put ≈ 1.30 @0.10Δ, m_call ≈ 1.05, both stable; vol level identified as the dominant error source.)*
 - [x] **S.6** Write the spike memo: error tables, whether raw BS alone or BS+single-m gets the 0.10Δ strike within one 5-pt increment, and what the result implies about FR-4.3 feasibility. *(Done — `spike/memo.md`. Finding: feasible with the right vol level (92% within one strike at 0.10Δ); requires adding a time-of-day vol multiplier curve f(t) to the calibration framework.)*
 
-**Gate S:** Trader reviews the memo and decides the derived-pricing approach is viable (possibly with regime-bucketed m to be calibrated later). If derived pricing cannot plausibly hit the FR-4.3 tolerance even on one in-sample day, stop and rethink before Phase 0. **Decision items for the trader in `spike/memo.md` §Recommendations: (1) adopt f(t) vol-curve amendment, (2) VIX vs VIX1D convention, (3) ongoing chain-recording plan.**
+**Gate S: ✅ PASSED 2026-06-11 (trader decision).** Outcome: **restructure to the price-barrier model** — labels are price facts (no-touch primary, settle-beyond secondary); no option pricing in the pipeline; derived-pricing/delta-breach machinery shelved as documented v2. Vol convention: VIX1D anchor for normalization/features/baseline (f(t) correction only if FR-5.1 baseline validation demands it). Recording plan: already running (`eleuthera/events/`). Requirements rewritten accordingly (Sections 1, 3, FR-3/4/5, 6.2–6.3, 8).
 
 ---
 
@@ -27,32 +37,31 @@
 
 **Goal:** All raw inputs acquired, cleaned, versioned, and queryable.
 
-- [ ] **0.1** Acquire SPX 1-min OHLC, ≥4 years, RTH only (SPX is a calculated index — no volume exists). **Source decided: IB TWS API via `data/ib_download.py` ($0; trader's own brokerage). Cross-check vendor bars against the trader's own 2026-06-01 recording (timezone: IB=ET, recordings=PT).** Verify: 390 bars/day, correct holiday/half-day handling, no duplicate or missing bars; document any vendor quirks (index print vs. futures-derived). Note: 1-min index data has more vendor-specific gaps/anomalies than 5-min — budget extra QA time here.
-- [ ] **0.2** Acquire VIX1D history (daily at minimum; intraday if available). Document exact availability start date — this sets the training-universe start (index launched 2023-04-23). **Source: IB TWS API (`data/ib_download.py --check` verifies VIX1D listing + history depth); CBOE's free daily CSV as fallback/cross-check. Also pull VIX 1-min + deep daily SPX/VIX for regime-percentile features.**
-- [ ] **0.3** Build the economic calendar table: FOMC, CPI, NFP, monthly/quarterly OPEX, half-days, for the full span.
-- [ ] **0.4** Inventory the trader's existing 0DTE chain snapshots: list days, times, VIX1D level on each. Identify regime gaps (target ≥3 VIX1D regimes × ≥2 times of day per FR-5.1).
-- [ ] **0.5** If gaps exist, set up an ongoing recording habit/process so the trader captures chain snapshots on days in the missing regime cells (no purchases — coverage grows only through recording). Document which cells remain open at Gate 0.
-- [ ] **0.6** Digitize the trade log: entry time, side, strike, stop/exit time and reason, credit, for every past 0DTE trade available.
-- [ ] **0.7** Stand up versioned storage (even just parquet + a manifest with hashes) and a single load API all later code uses. No notebook reads raw vendor files directly.
+- [x] **0.1** Acquire SPX 1-min OHLC, ≥4 years, RTH only (SPX is a calculated index — no volume exists). *(Done 2026-06-11 — IB TWS API via `data/ib_download.py`, $0. 2004-03→present, 5,615 days, audited by `data/qa_ib.py` (zero dups/OHLC violations; documented holes in `data/ib/README.md`). Cross-checked vs the trader's 2026-06-01 recording: 390/390 bars aligned, 381 exact.)* Verify: 390 bars/day, correct holiday/half-day handling, no duplicate or missing bars; document any vendor quirks (index print vs. futures-derived). Note: 1-min index data has more vendor-specific gaps/anomalies than 5-min — budget extra QA time here.
+- [x] **0.2** Acquire VIX1D history (daily at minimum; intraday if available). Document exact availability start date — this sets the training-universe start. *(Done 2026-06-11 — VIX1D 1-min from IB, 2023-04-26→present, 784 days, fully clean → training universe starts 2023-04-26. Also pulled: VIX 1-min 2005→present, SPX/VIX daily for regime-percentile features. Audited by `data/qa_ib.py`.)*
+- [x] **0.3** Build the economic calendar table: FOMC, CPI, NFP, monthly/quarterly OPEX, half-days, for the full span. *(Done 2026-06-11 — `load_calendar()` in `data/loader.py`: half-days from bar-count signatures, OPEX computed, FOMC/CPI/NFP from `data/raw/econ-events.csv` (102 events compiled from federalreserve.gov + bls.gov, incl. 2025-shutdown reschedules). Scope: event flags cover the v1 universe (2023-04→) only — extend before any pre-2023 ablation. NFP releases on Good Fridays deliberately unflagged.)*
+- [x] **0.4** Inventory the trader's existing 0DTE chain snapshots: list days, times, VIX1D level on each. Identify regime gaps (target ≥3 VIX1D regimes × ≥2 times of day per FR-5.1). *(Done 2026-06-11 — `data/raw/README.md`: one day (2026-06-01, full session, calm tercile, VIX1D ≈ 10). Coverage matrix: calm ✅ both times of day; mid and elevated regimes empty → feeds task 0.5 recording priorities.)*
+- [x] **0.5** If gaps exist, set up an ongoing recording habit/process so the trader captures chain snapshots on days in the missing regime cells (no purchases — coverage grows only through recording). Document which cells remain open at Gate 0. *(Resolved 2026-06-11 — already running: the trader's system (`../eleuthera`, `writer` module) has been recording full chains continuously; `eleuthera/events/` holds 303 days (2024-12-17→2026-06-05, 223 GB) and grows daily. Remaining regime-coverage audit moves to Phase 1 calibration prep.)*
+- [x] **0.6** Digitize the trade log: entry time, side, strike, stop/exit time and reason, credit, for every past 0DTE trade available. *(Done 2026-06-11 — source is better than expected: 301 days of rules-based backtest replay over real recorded chains (`eleuthera/analyzer/logs`, JSON-lines, machine-readable entry/exit/reason/fills/P&L; 294 spreads). Parsed by `spike/false_breakout_cost.py`; exit-rule spec extracted from strategy code. Timestamps US/Pacific. Note: replay of the live rules, not broker fills — fills use recorded quotes, deterministic rules; treat as the canonical rule-behavior record.)*
+- [x] **0.7** Stand up versioned storage (even just parquet + a manifest with hashes) and a single load API all later code uses. No notebook reads raw vendor files directly. *(Done 2026-06-11 — `data/loader.py`: `build` produces `data/processed/*.parquet` + sha256 manifest from the raw IB CSVs (sort/dedupe, RTH filter, closed-day junk drop, half-day truncation at 12:59 ET); `load_bars()/trading_days()` is the API, with manifest-hash verification on every load. Tests: `tests/test_loader.py`, 11 passing. Outstanding: `VIX1D-1day` not yet downloaded from IB.)*
 
 **Gate 0:** A script reproduces every dataset from raw → clean with one command; bar-count and calendar audits pass; chain coverage matrix documented (empty cells flagged as risks, with a recording plan — they do not block the gate, since coverage can only grow over calendar time).
 
 ---
 
-## Phase 1 — Strike Reconstruction & Calibration
+## Phase 1 — Grid, Baseline & Validation Framework *(rewritten at Gate S)*
 
-**Goal:** Skew-adjusted BS machinery that places historical 0.10Δ (and grid) strikes within tolerance, plus a calibrated stop threshold.
+**Goal:** The analytic framework around the price labels: strike-grid placement, the p_mkt no-touch baseline with documented bias, distance buckets, and the exit-rule characterization that links model output to overlay value.
 
-- [ ] **1.1** Promote the spike's BS strike solver (S.3) to production: move behind the load API, full unit tests against textbook values.
-- [ ] **1.2** From each calibration chain: extract the actual 0.05/0.10/0.15/0.20/0.30Δ strikes per side; compute m = actual distance ÷ BS distance for each.
-- [ ] **1.3** Analyze m stability: by side, by VIX1D regime, by time of day, by delta level. Decide: single m per side vs. VIX1D-tercile buckets (FR-5.1).
-- [ ] **1.4** Lock m values; implement the adjusted strike function and freeze it behind the load API.
-- [ ] **1.5** Acceptance test (FR-4.3): on held-out chain snapshots (not used to fit m), reconstructed 0.10Δ strike within 5 pts of actual ≥ ~80% of the time, no systematic one-sided bias by regime. If failing: record additional chain days, revisit bucketing, re-test.
-- [ ] **1.6** Implement forward delta computation: delta of a fixed K at any later bar given updated S, T, σ; define the σ-update rule (intraday VIX1D, or hold-at-entry fallback).
-- [ ] **1.7** Calibrate δ\* (FR-5.2): replay logged trades through the delta engine; find the delta level that best reproduces actual stop-outs from the 2–3× credit rule. Record chosen δ\* and the evidence.
-- [ ] **1.8** Sensitivity memo: how labels shift if σ-update rule changes (intraday vs. static) and if δ\* moves ±0.05. If labels are fragile to these, flag before proceeding.
+- [ ] **1.1** Implement the normalized-distance machinery behind the load API: D(K, S, σ, T), grid placement at the FR-4 anchors with 5-pt snapping, and the σ convention (VIX1D daily anchor; calendar-time √T). Unit tests.
+- [ ] **1.2** Implement analytic p_mkt: no-touch probability from (D, side, T) via the reflection-principle barrier formula, same σ convention. Unit-test against Monte Carlo GBM paths.
+- [ ] **1.3** Document the distance↔delta mapping empirically: on recorded-chain days (`eleuthera/events/`), regress recorded deltas against D by side/regime/time-of-day. Fix the bucket boundaries (incl. band of record) in D units; record the delta-equivalent labels.
+- [ ] **1.4** Baseline validation (FR-5.1): compare analytic p_mkt against market-implied touch probability from recorded chains across ≥3 VIX1D regimes × ≥2 times of day. Decide: raw VIX1D anchor vs f(t)-corrected. Freeze the choice; document bias by regime/slice.
+- [ ] **1.5** Grid coverage acceptance (FR-4.3): grid spans the chains' actual 0.05–0.30Δ strikes ≥ ~95% of observations on recorded days. If failing: widen anchors, re-test.
+- [ ] **1.6** Exit-rule characterization (FR-5.2): from the eleuthera logs, for each early-exit reason: exit→touch frequency, exit→settle outcomes, timing distributions, by regime. (Extends `spike/false_breakout_cost.py` to a versioned analysis.)
+- [ ] **1.7** Sensitivity memo: how grid placement, buckets, and p_mkt shift under σ-anchor variants (prior-close vs open VIX1D; ±f(t)). Labels are σ-free by construction — confirm nothing else is fragile.
 
-**Gate 1:** 1.5 acceptance passes; δ\* documented and reproduces real stop behavior on the trade log; sensitivity memo reviewed.
+**Gate 1:** p_mkt validated with documented bias; buckets frozen; grid coverage passes; exit characterization reviewed by trader; sensitivity memo reviewed.
 
 ---
 
@@ -60,12 +69,12 @@
 
 **Goal:** The full training table's target columns, validated.
 
-- [ ] **2.1** Implement the per-bar label engine (FR-3): for every day × sample-stride bar × side × grid delta {0.05, 0.10, 0.15, 0.20, 0.30}, place the strike, walk forward **at 1-min resolution**, emit: binary survival label, breach time (if any), max delta reached, settlement-beyond-strike secondary label. Sample stride configurable (default 5 min); breach detection always 1-min.
+- [ ] **2.1** Implement the per-bar label engine (FR-3): for every day × sample-stride bar × side × grid distance anchor, place the strike (1.1), scan forward **at 1-min resolution** against bar highs/lows, emit: no-touch label, touch time (if any), closest approach in implied-move units, settle-beyond secondary label. Sample stride configurable (default 5 min); touch detection always 1-min. No option math anywhere in this engine.
 - [ ] **2.1b** Stride sensitivity check: regenerate labels for a sample month at 1-min stride and confirm conclusions in 2.3 are stride-invariant before committing the default.
-- [ ] **2.2** Run over full history; persist as the labels table keyed by (date, stride bar, side, grid_delta).
-- [ ] **2.3** Sanity statistics: base survival rates per delta bucket vs. theory (0.10Δ touch-style failure should land in a plausible ~15–25% zone, monotone across the grid); failure-time distributions; put/call asymmetry; regime breakdowns. Investigate anything implausible before continuing.
-- [ ] **2.4** Spot-validation (FR-5.3): for every day in the trade log, compare pipeline labels at the trader's actual entry bar/strike against what really happened. Every disagreement gets a written explanation (acceptable noise vs. pipeline bug).
-- [ ] **2.5** Visual audit: plot ~15 randomly sampled days (price path, strikes, breach markers) and have the trader eyeball them — cheap and catches bugs statistics miss.
+- [ ] **2.2** Run over full history (VIX1D universe, 2023-04-26→); persist as the labels table keyed by (date, stride bar, side, grid_anchor).
+- [ ] **2.3** Sanity statistics: base no-touch rates per distance bucket vs. the analytic baseline (≈0.10Δ-equivalent touch failure plausibly ~15–25%, monotone across the grid); touch-time distributions; put/call asymmetry; regime breakdowns. Cross-check against the trade-log base rates (294 spreads: 100% of held-to-expiry survived; see memo Addendum 2). Investigate anything implausible before continuing.
+- [ ] **2.4** Spot-validation (FR-5.3): for all 294 logged trades, compare pipeline labels at the actual entry bar/strike against the logged outcome (touch/settle directly verifiable). Every disagreement gets a written explanation (acceptable noise vs. pipeline bug).
+- [ ] **2.5** Visual audit: plot ~15 randomly sampled days (price path, strikes, touch markers) and have the trader eyeball them — cheap and catches bugs statistics miss.
 
 **Gate 2:** 2.3 statistics plausible; 2.4 disagreements all explained; visual audit signed off.
 
@@ -79,8 +88,8 @@
 - [ ] **3.2** Implement features against the load API. One function per feature, config-registered.
 - [ ] **3.3** Build the lookahead test harness (NFR-1.1): recompute every feature at bar t using data truncated at t; assert exact equality with the full-data computation, across many random (day, bar) pairs. This runs in CI on every change.
 - [ ] **3.4** Feature QA: distributions, NaN handling at day-open edges (several features are undefined in the first bars — define and document the policy), correlation matrix to spot redundancies.
-- [ ] **3.5** Assemble the master training table: features ⋈ labels, one row per (date, stride bar, side, grid_delta). Persist versioned.
-- [ ] **3.6** Implement p_mkt: implied survival baseline per row from strike delta, consistent with the labeling framework. Store as a column — it is both a feature input and the evaluation benchmark.
+- [ ] **3.5** Assemble the master training table: features ⋈ labels, one row per (date, stride bar, side, grid_anchor). Persist versioned.
+- [ ] **3.6** Attach p_mkt (the Phase 1 analytic no-touch baseline, frozen in 1.4) per row. Store as a column — it is both a candidate feature input and the evaluation benchmark.
 
 **Gate 3:** Lookahead harness green; spec sheet matches code; master table builds reproducibly end-to-end from raw data.
 
@@ -92,7 +101,7 @@
 
 - [ ] **4.1** Implement the split scheme (NFR-1.2): chronological splits by week with an embargo gap; final test period (most recent ~15–20% of days) carved out and **locked** — no code path reads it except the Phase 5 final run.
 - [ ] **4.2** Baselines first: (a) constant base-rate predictor, (b) p_mkt alone, (c) logistic regression on 5 features. These define the floor and the bar.
-- [ ] **4.3** Train v1 GBT (LightGBM/XGBoost) with the monotone constraint on strike delta; side as indicator (compare against two-head variant in 4.6).
+- [ ] **4.3** Train v1 GBT (LightGBM/XGBoost) with the monotone constraint on normalized distance (survival non-decreasing in distance); side as indicator (compare against two-head variant in 4.6).
 - [ ] **4.4** Hyperparameter search via the walk-forward validation folds only — small grid, heavy regularization priors given effective N ≈ days, not rows.
 - [ ] **4.5** Post-hoc calibration (isotonic or Platt) fit on a validation fold never used for model selection.
 - [ ] **4.6** Ablations on validation folds: side-indicator vs. two heads; with/without prior-day block; with/without p_mkt as input feature; feature-importance review and pruning of dead weight back toward the 20–30 budget.
@@ -107,7 +116,7 @@
 
 **Goal:** The honest answer, against the pre-registered criteria.
 
-- [ ] **5.1** Freeze: model artifact, calibrator, feature code, m values, δ\* — all hashed and recorded.
+- [ ] **5.1** Freeze: model artifact, calibrator, feature code, grid anchors, bucket boundaries, p_mkt parameters — all hashed and recorded.
 - [ ] **5.2** Single run on the locked test period. No iteration. (If something is broken, fix the bug, document it, and the re-run is itself documented — but no tuning against test results.)
 - [ ] **5.3** Evaluate Section-8 success criteria: per-bucket calibration (±3 pts in 0.10–0.15Δ); Brier vs. p_mkt baseline with sub-period stability; pooled-mean agreement; monotonicity.
 - [ ] **5.4** Rough economic check: approximate spread P&L simulation (BS on spot + VIX1D, no chains needed) comparing "trade everything" vs. "filter/side-select by model probability." This is indicative, not a backtest of record.

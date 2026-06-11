@@ -19,6 +19,29 @@ not as zero values or interpolation targets.
 | --- | --- | --- | --- |
 | VIX | 2006-05-01 → 2006-05-19 | zero bars for 15 consecutive weekdays | Walking-back queries return three consecutive `error 162` ("HMDS query returned no data"). Adjacent days (Apr 28, May 22) are clean full RTH days. |
 | VIX | 2011-05-27 | only 29 bars, 15:31–15:59 ET (no morning session) | Refetched independently and IB returns the same 29 bars. Listed in `KNOWN_IB_HOLES` in `data/ib_download.py` so `--fill-gaps` doesn't loop forever trying to refill it. |
+| SPX | 2011-05-27 | only 28 bars, afternoon only | Same IB-side hole as VIX that day. In `KNOWN_IB_HOLES`. |
+| SPX | 2004-04-09 | 1 junk bar on Good Friday (market closed) | In `KNOWN_IB_HOLES` (trips the <200-bar gap heuristic). Loader drops via holiday calendar. |
+| SPX | 2004-05-31 | 373 stale flat prints (1120.29 all day) on Memorial Day (market closed) | Does **not** trip the gap heuristic (>200 bars). Loader must drop via holiday calendar — a "flat all day" sanity check is a good belt-and-braces. |
+| SPX | 2020-12-07 | 374 bars (16 minutes missing) | Isolated; accepted as-is. |
+
+Additional conventions confirmed by the Gate 0 audit (`data/qa_ib.py`):
+
+- **Vol indices print from 09:31**, not 09:30 — 389 bars is a *normal* full day
+  for VIX/VIX1D (and 209 a normal half day). Not gaps.
+- **Half days carry a 13:00–13:15 tail** in some eras (225-bar SPX days,
+  224-bar VIX days). The loader truncates half days at 13:00 ET.
+- **2004–2007 SPX has ~40 days with a handful of missing minutes**
+  (377–389 bars). Accepted: this era is outside the v1 training universe and
+  only feeds long-history regime features, which tolerate missing minutes.
+- **VIX has ~20 deeply partial days** (238–378 bars, mostly 2005–2011 plus
+  COVID March 2020). The canonical enumerated list lives in `KNOWN_HOLES`
+  in `data/qa_ib.py`; treat that as the source of truth rather than this
+  table for per-day detail.
+- The v1 training era (2023-04 →) is clean: zero anomalies in all three
+  symbols, zero duplicate timestamps, zero OHLC violations.
+- IB 2026-06-01 SPX bars cross-checked against the trader's own recording:
+  390/390 bars aligned (ET = PT+3h), 381 exact, max close diff 1.63 pts
+  (live-snapshot vs consolidated-history revisions; benign).
 
 The downloader's per-day-bar-count heuristic (`GAP_THRESHOLD_BARS = 200`)
 also won't be tripped by **zero-bar** holiday/closed days — only by *partial*
