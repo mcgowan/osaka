@@ -20,6 +20,7 @@ sqrt(T) convention) outranks absolute accuracy (NFR-3.4).
 import math
 from statistics import NormalDist
 
+from .conventions import f_correction
 from .distance import _check
 
 _N = NormalDist().cdf
@@ -45,3 +46,15 @@ def no_touch_prob(K, S, sigma, T, side):
     else:
         p = _N((b - nu * T) / sq) - reflect * _N((-b - nu * T) / sq)
     return min(1.0, max(0.0, p))
+
+
+def p_mkt(K, S, sigma_anchor, T, side, minutes_since_open):
+    """THE baseline (FR-5.1, frozen task 1.4): no-touch probability with the
+    f(t)-corrected vol, sigma = f(side, t) * sigma_anchor.
+
+    This is the number the model must beat and the kill criterion is judged
+    against. sigma_anchor is the raw prior-close VIX1D (decimal) from
+    SigmaAnchor; minutes_since_open is minutes since 09:30 ET.
+    """
+    sigma = f_correction(side, minutes_since_open) * sigma_anchor
+    return no_touch_prob(K, S, sigma, T, side)

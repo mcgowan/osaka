@@ -149,6 +149,38 @@ def test_pmkt_put_call_near_symmetry():
             assert pp < pc
 
 
+def test_f_correction_interpolation():
+    from quant.conventions import F_T_KNOTS, f_correction
+    for side in ("p", "c"):
+        knots = F_T_KNOTS[side]
+        # exact at knots, flat beyond ends
+        for m, v in knots:
+            assert f_correction(side, m) == pytest.approx(v)
+        assert f_correction(side, 0) == knots[0][1]
+        assert f_correction(side, 389) == knots[-1][1]
+        # between first two knots: strictly between their values
+        mid = f_correction(side, (knots[0][0] + knots[1][0]) / 2)
+        lo, hi = sorted((knots[0][1], knots[1][1]))
+        assert lo < mid < hi
+    # puts always carry the bigger correction (skew)
+    for m in (5, 100, 250, 330):
+        assert f_correction("p", m) > f_correction("c", m)
+
+
+def test_p_mkt_baseline_vs_uncorrected():
+    from quant.pmkt import p_mkt
+    # corrected vol > anchor vol => lower survival than the naive number
+    naive = no_touch_prob(7550, S, SIGMA, T_3H, "p")
+    corrected = p_mkt(7550, S, SIGMA, T_3H, "p", minutes_since_open=210)
+    assert corrected < naive
+    assert 0.0 <= corrected <= 1.0
+    # equals no_touch_prob at the corrected sigma exactly
+    from quant.conventions import f_correction
+    sigma_c = f_correction("p", 210) * SIGMA
+    assert corrected == pytest.approx(
+        no_touch_prob(7550, S, sigma_c, T_3H, "p"), abs=1e-15)
+
+
 def test_pmkt_against_monte_carlo():
     """Verify the reflection formula against simulated GBM paths.
 

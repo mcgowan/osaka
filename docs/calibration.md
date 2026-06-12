@@ -54,3 +54,61 @@ conventions.
 empirical case for evaluating an f(t)/regime correction to the p_mkt anchor
 in task 1.4; bucket noise quantified here feeds the task 1.7 sensitivity
 memo.
+
+## Task 1.4 — p_mkt baseline validation & f(t) freeze (2026-06-11)
+
+**Method:** same 62-day stratified sample, p_mkt evaluated at the actual
+FR-4 grid strikes (2,451 points). Reference truth = the same first-passage
+formula with each strike's *recorded IV* (IB's IV shares our calendar-time
+convention, verified in Phase S). Code: `analysis/baseline_validation.py`;
+raw points: `analysis/baseline_validation.csv`.
+
+**Finding — the raw anchor is unusable as a benchmark:** bias
+(p_anchor − p_chainIV) is one-sided and large: **+0.21 in the put band of
+record** (+0.14 calls), nearly constant across times of day. Cause: the
+prior-close VIX1D anchor understates effective remaining-session vol
+(annualization convention) and ignores skew. A baseline this optimistic
+would let any model "beat the market" for free — the kill criterion would
+be meaningless.
+
+**Fix — frozen f(t) correction:** per-side, four time-of-day knots, fitted
+as the median recorded-IV/anchor ratio (full sample):
+
+| minutes since open | 5 | 90 | 210 | 330 |
+|---|---|---|---|---|
+| puts | 1.868 | 1.753 | 1.709 | 1.694 |
+| calls | 1.418 | 1.317 | 1.329 | 1.402 |
+
+Piecewise-linear between knots, flat beyond. **Held-out validation** (fit on
+odd days, eval on even): band-of-record mean bias **−0.005** both sides
+(MAE 0.058 puts / 0.098 calls — symmetric per-day vol noise, acceptable for
+a baseline). Regime-stable: ratio drifts only ~5% calm→elevated vs the
+~70–87% level it corrects. Frozen in `quant/conventions.py::F_T_KNOTS`;
+the baseline callable is `quant.pmkt.p_mkt(...)`.
+
+## Task 1.5 — grid coverage acceptance (2026-06-11)
+
+**Method:** for every (day, snapshot, side) observation in the task 1.3
+sample, place the FR-4 grid at that bar's (S, σ_anchor, T) and check it
+brackets the chain's actual 0.05–0.30Δ strike range in D units. Code:
+`analysis/grid_coverage.py`.
+
+**Iteration:** median-only anchors covered ~50% of the 0.05Δ tail by
+construction; first bracketing attempt (p2.5/p97.5 of the edge levels)
+reached 95.0% calls / 91.6% puts — snap jitter at the inner edge and the
+fat far tail (observed D(0.05Δ) max 6.1) eat the margin. Final anchors add
+wider brackets: puts {0.35, …, 5.60}, calls {0.32, …, 5.00}.
+
+**Result: PASS — puts 98.7%, calls 97.9%** (remaining misses are extreme
+far-wing days; the 0.05Δ wing is explicitly non-blocking per the Phase S
+memo). Cost: 7 anchors/side instead of 5 → training table grows ~40%.
+
+**Scope decision (NFR-3.4 amendment):** f(t) is part of the **p_mkt
+definition only**. The distance encoding, grid, and buckets stay on the raw
+anchor: their delta-faithfulness was achieved *empirically* in task 1.3
+against the same chains, so the two components are market-consistent
+without sharing the multiplier — and keeping f(t) out of the feature
+coordinate means the model's input space carries no fitted time-of-day
+table (time-of-day effects are the model's job to learn, via its clock
+features). Documented residual baseline noise (MAE above) is carried into
+the task 1.7 sensitivity memo and the Phase 4/5 evaluation interpretation.

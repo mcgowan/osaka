@@ -81,7 +81,7 @@ Initial feature budget: **20–30 features.** Additions require demonstrated imp
 4. No option pricing, σ path, or greek computation anywhere in this pipeline — labels depend only on the SPX bar series and K.
 
 ### FR-4: Strike grid placement (historical training rows)
-1. Training strikes are placed at fixed **normalized-distance anchors** from spot, i.e. K = S ∓ D·σ√T·S snapped to the listed 5-pt increment, at the per-side anchor sets frozen by task 1.3 (`quant/conventions.py::GRID_ANCHORS`): puts {0.80, 1.35, 1.75, 2.30, 3.35}, calls {0.75, 1.15, 1.40, 1.75, 2.40} — the empirical median D of the 0.30/0.20/0.15/0.10/0.05Δ levels measured from 62 recorded-chain days (see `docs/calibration.md`). *(Amended from the draft single-sided anchors at Gate-S restructure time; put skew makes equal-delta put strikes sit much farther out in implied-move units.)*
+1. Training strikes are placed at fixed **normalized-distance anchors** from spot, i.e. K = S ∓ D·σ√T·S snapped to the listed 5-pt increment, at the per-side anchor sets frozen by tasks 1.3/1.5 (`quant/conventions.py::GRID_ANCHORS`): puts {0.35, 0.80, 1.35, 1.75, 2.30, 3.35, 5.60}, calls {0.32, 0.75, 1.15, 1.40, 1.75, 2.40, 5.00} — five interior anchors at the empirical median D of the 0.30/0.20/0.15/0.10/0.05Δ levels measured from 62 recorded-chain days, plus two bracketing anchors sized so the grid passes the FR-4.3 coverage test (see `docs/calibration.md`). *(Amended from the draft single-sided anchors at Gate-S restructure time; put skew makes equal-delta put strikes sit much farther out in implied-move units.)*
 2. The snapped strike's actual normalized distance is what enters the feature row — anchors are sampling targets, not data values.
 3. Acceptance: on recorded-chain days, the grid's span must cover the chain's actual 0.05–0.30Δ strikes per side ≥ ~95% of (day × stride-bar) observations — i.e. the training distribution covers where live queries will land. (Pricing-accuracy acceptance is obsolete: nothing in the pipeline claims to price options.)
 
@@ -124,7 +124,7 @@ History predating VIX1D availability is excluded from v1 rather than approximate
 1. Deterministic pipeline: fixed seeds, versioned data snapshots, config-driven feature definitions.
 2. Every feature documented as: name, formula, lookback, normalization, point-in-time rule (the feature spec doubles as the pipeline requirements).
 3. Live-query latency target: < 1 second per bar for both sides at one strike (trivial for GBT; stated to preclude architecture creep).
-4. Internal consistency rule: grid placement, the normalized-distance encoding, bucket boundaries, and p_mkt must all use the **same** σ source and √T convention. Model-relative consistency outranks absolute accuracy of any component.
+4. Internal consistency rule: grid placement, the normalized-distance encoding, bucket boundaries, and p_mkt must all use the **same** σ source (prior-close VIX1D anchor) and √T convention. *(Amended at task 1.4: p_mkt additionally applies the frozen per-side f(t) correction to the shared anchor — see `docs/calibration.md`. D/grid/buckets stay on the raw anchor; both components are calibrated against the same recorded chains, which is what keeps them mutually consistent.)* Model-relative consistency outranks absolute accuracy of any component.
 
 ## 6. Explicit Design Decisions (settled in discovery)
 

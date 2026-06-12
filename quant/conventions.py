@@ -27,9 +27,13 @@ SETTLE_HALF = time(13, 0)   # ET (half-day sessions)
 # strikes much farther out in implied-move units. NOTE: D values are bound
 # to THIS project's sigma convention (prior-close VIX1D + calendar-time
 # sqrt(T)) - they are not comparable to textbook d-values.
+# Interior anchors = median D at the {0.30,0.20,0.15,0.10,0.05} delta levels;
+# bracketing anchors (first/last) = p2.5 of the 0.30-delta level and p97.5 of
+# the 0.05-delta level, added by task 1.5 so the grid SPANS the region live
+# queries land in (median-only anchors covered only ~half the 0.05-delta tail).
 GRID_ANCHORS = {
-    "p": (0.80, 1.35, 1.75, 2.30, 3.35),
-    "c": (0.75, 1.15, 1.40, 1.75, 2.40),
+    "p": (0.35, 0.80, 1.35, 1.75, 2.30, 3.35, 5.60),
+    "c": (0.32, 0.75, 1.15, 1.40, 1.75, 2.40, 5.00),
 }
 STRIKE_INCREMENT = 5.0
 
@@ -44,6 +48,36 @@ BUCKET_EDGES_D = {  # side -> (D at 0.05, 0.10, 0.15, 0.25 delta)
 }
 BUCKET_LABELS = ("lt05", "05-10", "10-15", "15-25", "gt25")
 BAND_OF_RECORD = "10-15"
+
+
+# --- p_mkt vol correction f(t) (FR-5.1, frozen by task 1.4) ------------------
+# The raw prior-close VIX1D anchor understates the market's effective
+# remaining-session vol by ~70-87% (annualization convention + skew),
+# making the uncorrected baseline ~+13 to +21 points optimistic in the band
+# of record. f(t) = median recorded-IV / anchor, fitted per side at four
+# time-of-day knots over the 62-day stratified sample
+# (analysis/baseline_validation.py; held-out band-of-record bias after
+# correction: -0.005, MAE 0.06-0.10; regime-stable to ~5%).
+# SCOPE: f(t) is part of the p_mkt DEFINITION only. The distance encoding,
+# grid, and buckets stay on the raw anchor - they were empirically
+# calibrated against the same chains in task 1.3, so the two stay
+# market-consistent without sharing the multiplier (see docs/calibration.md).
+F_T_KNOTS = {  # side -> ((minutes_since_0930_ET, ratio), ...)
+    "p": ((5, 1.868), (90, 1.753), (210, 1.709), (330, 1.694)),
+    "c": ((5, 1.418), (90, 1.317), (210, 1.329), (330, 1.402)),
+}
+
+
+def f_correction(side, minutes_since_open):
+    """Piecewise-linear f(t) between knots, flat beyond the ends."""
+    knots = F_T_KNOTS[side]
+    if minutes_since_open <= knots[0][0]:
+        return knots[0][1]
+    for (m0, v0), (m1, v1) in zip(knots, knots[1:]):
+        if minutes_since_open <= m1:
+            w = (minutes_since_open - m0) / (m1 - m0)
+            return v0 + w * (v1 - v0)
+    return knots[-1][1]
 
 
 def delta_bucket(D, side):
