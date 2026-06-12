@@ -94,9 +94,16 @@ def summarize():
             r[k] = float(r[k])
         rows.append(r)
 
+    # Chronological split with an embargo gap (inviolable rule #2 applies to
+    # experiments too): fit = first 60% of sampled days, skip one sampled day
+    # (sampled days are ~5 trading days apart, so the gap is ~a calendar
+    # week), eval = the remainder. NOTE: an earlier draft used interleaved
+    # days[::2], which is mildly optimistic under day-autocorrelated regimes;
+    # the f(t) decision survives either split (capacity = 4 medians/side).
     days = sorted({r["day"] for r in rows})
-    fit_days = set(days[::2])     # odd-indexed by order = fit set
-    eval_days = set(days) - fit_days
+    cut = int(len(days) * 0.6)
+    fit_days = set(days[:cut])
+    eval_days = set(days[cut + 1:])  # +1 = embargo gap of one sampled day
 
     # --- raw-anchor bias by side x bucket ---
     print("=== bias = p_anchor - p_chainIV (raw VIX1D anchor) ===")
@@ -132,11 +139,14 @@ def summarize():
                    and r["snap_pt"] == hhmm and r["day"] in fit_days]
             if sel:
                 f_t[(side, hhmm)] = median(sel)
-    print("\n=== fitted f(t) = median IV/anchor (fit half of days) ===")
+    print(f"\n=== fitted f(t) = median IV/anchor "
+          f"(chronological fit: {len(fit_days)} days through {max(fit_days)}; "
+          f"eval: {len(eval_days)} days from {min(eval_days)}) ===")
     for (side, hhmm), v in sorted(f_t.items()):
         print(f"  {side} {hhmm}: {v:.3f}")
 
-    print("\n=== held-out (even days) bias by bucket: raw vs f(t)-corrected ===")
+    print("\n=== held-out (chronological, embargoed) bias by bucket: "
+          "raw vs f(t)-corrected ===")
     cal = load_calendar()
     half = set(cal[cal["is_half_day"]]["date"].dt.strftime("%Y-%m-%d"))
     print(f"{'side':>4} {'bucket':>6} {'n':>5} {'raw mean':>9} {'raw MAE':>8} "

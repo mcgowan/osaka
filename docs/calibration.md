@@ -10,7 +10,10 @@ distance D computed with the frozen σ convention (prior-close VIX1D,
 calendar-time √T), D interpolated at target deltas. 2,932 mapping points.
 Code: `analysis/delta_mapping.py`; raw points: `analysis/delta_mapping.csv`.
 
-**Result — median D [IQR] at each delta level:**
+**Result — median D [IQR] at each delta level** *(in-sample definitional
+medians: these define the coordinate system rather than claim
+generalization; out-of-sample fidelity is what task 1.4's held-out
+validation and Phase 2's label statistics test)*:
 
 | Δ level | puts | calls |
 |---|---|---|
@@ -79,11 +82,19 @@ as the median recorded-IV/anchor ratio (full sample):
 | puts | 1.868 | 1.753 | 1.709 | 1.694 |
 | calls | 1.418 | 1.317 | 1.329 | 1.402 |
 
-Piecewise-linear between knots, flat beyond. **Held-out validation** (fit on
-odd days, eval on even): band-of-record mean bias **−0.005** both sides
-(MAE 0.058 puts / 0.098 calls — symmetric per-day vol noise, acceptable for
-a baseline). Regime-stable: ratio drifts only ~5% calm→elevated vs the
-~70–87% level it corrects. Frozen in `quant/conventions.py::F_T_KNOTS`;
+Piecewise-linear between knots, flat beyond. **Held-out validation
+(chronological split per inviolable rule #2: fit = first 60% of sampled
+days through 2025-11-20, one-sampled-day embargo ≈ a calendar week, eval =
+last 24 days from 2025-11-26):** band-of-record mean bias **−0.026 puts /
+−0.006 calls, MAE 0.063 / 0.077** — symmetric per-day vol noise, acceptable
+for a baseline. *(Trader-review correction note: an earlier draft reported
+−0.005 from an interleaved days[::2] split, which is mildly optimistic
+under day-autocorrelated vol regimes and violated the split rule's
+"everywhere, including quick experiments" clause. Regenerated; the
+adoption decision is unaffected — f(t) has 4-median-per-side capacity and
+the raw→corrected improvement (+0.13…0.21 → ≈−0.03) survives any
+reasonable split.)* Regime-stable: ratio drifts only ~5% calm→elevated vs
+the ~70–87% level it corrects. Frozen in `quant/conventions.py::F_T_KNOTS`;
 the baseline callable is `quant.pmkt.p_mkt(...)`.
 
 ## Task 1.5 — grid coverage acceptance (2026-06-11)
@@ -99,9 +110,12 @@ reached 95.0% calls / 91.6% puts — snap jitter at the inner edge and the
 fat far tail (observed D(0.05Δ) max 6.1) eat the margin. Final anchors add
 wider brackets: puts {0.35, …, 5.60}, calls {0.32, …, 5.00}.
 
-**Result: PASS — puts 98.7%, calls 97.9%** (remaining misses are extreme
-far-wing days; the 0.05Δ wing is explicitly non-blocking per the Phase S
-memo). Cost: 7 anchors/side instead of 5 → training table grows ~40%.
+**Result: PASS — puts 98.7%, calls 97.9%, measured in-sample** (the anchors
+were widened on the same 62 days the rate is computed on; remaining misses
+are extreme far-wing days, and the 0.05Δ wing is explicitly non-blocking
+per the Phase S memo). Out-of-sample coverage will be slightly lower on
+tail days; the grid is re-checkable for free on every newly recorded chain
+day. Cost: 7 anchors/side instead of 5 → training table grows ~40%.
 
 ## Task 1.6 — exit-rule characterization (2026-06-11)
 

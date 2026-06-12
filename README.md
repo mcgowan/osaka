@@ -17,15 +17,56 @@ delta is a **failure**. The product of this project is the **edge residual**:
 edge = p_model − p_mkt
 ```
 
-where `p_mkt` is the market-implied survival probability derived analytically from the
-strike's delta. The model is only useful insofar as `p_model` deviates from `p_mkt` in a
-calibrated, persistent way — by conditioning on intraday path, realized-vs-implied
-volatility, day structure, and calendar state that delta cannot see.
+where `p_mkt` is the market-implied no-touch probability (analytic barrier formula,
+chain-validated; `quant.pmkt.p_mkt()`). The model is only useful insofar as `p_model`
+deviates from `p_mkt` in a calibrated, persistent way — by conditioning on intraday path,
+realized-vs-implied volatility, day structure, and calendar state that the market's own
+estimate cannot see.
 
 A **pre-registered kill criterion** governs the outcome: if the edge residual is
 statistically indistinguishable from zero in the band of record after honest evaluation,
-the conclusion is that delta was sufficient and the project stops at a documented negative
-result. Tuning until something "works" is not an acceptable outcome.
+the conclusion is that the market's estimate was sufficient and the project stops at a
+documented negative result. Tuning until something "works" is not an acceptable outcome.
+
+## Relationship to the trading system (eleuthera)
+
+The model exists to give the trader's rules-based automated strategy
+(`../eleuthera`) an edge — specifically against **false breakouts / whipsaw
+stop-outs** (measured cost: ~$78k over 301 backtested days, ≈57% of strategy
+P&L) and by enabling **early-session entries** before the strategy's 30-min
+opening range exists. It must therefore remain an *independent second
+opinion*, which is enforced as a one-way rule:
+
+> **The strategy may learn from the model; the model never learns from the
+> strategy.**
+
+- The model is a **stateless oracle**: `(timestamp, strike, side) →
+  {p_model, p_mkt, residual}`. It knows nothing about opening ranges, RSI
+  heat/pressure signals, positions, or rules — by design (correlated second
+  opinions are worthless; this is why OR features are deliberately absent).
+- **Labels** are pure price facts; **features** are market state only. The
+  trader's chain recordings (`eleuthera/events/`, market prices — not
+  behavior) calibrate the baseline. The trade log is used *outside* the
+  learning loop only: exit-rule characterization, label spot-validation,
+  and read-only overlay economics after the model is frozen.
+- The only sanctioned influence of the trader's profile is **where the model
+  is graded** (band of record, early-session / near-strike / post-breakout
+  slices) — choosing the exam, never feeding answers. The kill criterion is
+  judged against the market baseline, not against strategy P&L.
+- **Planned integration points** (next-gen strategy, in build order):
+  (1) early-session entry gate — from 9:31 ET, enter when `p_model` is high
+  and the residual positive; OR-breakout entries remain as a parallel
+  trigger; (2) exit override — when `risk_off_reversal` / `sr_inner_breach`
+  fires, suppress the exit only on a strong conditional model signal (a
+  naive p_mkt threshold captures most of the historical prize but eats the
+  catastrophic tail — see `docs/calibration.md`, task 1.6); (3) later:
+  re-entry after stops, sizing by confidence.
+- Because the model never saw the rules, the strategy can evolve freely
+  without invalidating it. Candidate rules are evaluated by replaying the
+  recorded archive with model queries injected — using validation-period
+  outputs only, never the locked test period. Expect *correlation* between
+  model output and trading outcomes (both watch the same market); what is
+  excluded is the trader's decisions ever becoming training signal.
 
 ## How it works
 
@@ -84,7 +125,17 @@ These are never relaxed, by any contributor or agent, for any reason:
 ```
 docs/
   requirements.md   # Requirements: purpose, FRs/NFRs, success criteria, kill criterion
-  plan.md           # 7 gated phases with task IDs (e.g. task 1.7)
+  plan.md           # Gated phases with task IDs and live status table
+  calibration.md    # Phase 1 record: frozen values, evidence, sensitivity memo
+quant/              # Frozen conventions + distance/grid machinery + p_mkt baseline
+data/
+  loader.py         # THE load API (parquet + hashed manifest); loads bars + calendar
+  chains.py         # Validation-only access to the trader's recorded chain archive
+  ib_download.py    # IB TWS API downloader for SPX/VIX/VIX1D history ($0 source)
+  qa_ib.py          # Standing raw-data audit (Gate 0)
+analysis/           # Reproducible calibration/validation studies (script + CSV each)
+spike/              # Phase S derived-pricing spike + memo (decided Gate S)
+tests/              # pytest suite incl. Monte Carlo verification of p_mkt
 .claude/agents/     # Specialized review agents (see below)
 CLAUDE.md           # Working instructions for AI agents on this repo
 ```
@@ -97,7 +148,9 @@ reads raw vendor files directly. Datasets are parquet + a hashed manifest.
 
 Work proceeds strictly phase by phase; a phase does not start until the prior gate is signed
 off by the trader. Roughly half the total effort lives in Phases 0–2 — most quant projects
-die from bad labels and leakage, not bad models.
+die from bad labels and leakage, not bad models. Live status lives in the table at the top
+of `docs/plan.md` (as of 2026-06-11: Phase S passed, Phase 0 complete, Phase 1 complete and
+awaiting Gate 1 trader review).
 
 0. **Data Foundation** — acquire, clean, version, and expose all raw inputs via the load API.
 1. **Grid, Baseline & Validation Framework** — distance/grid machinery; analytic `p_mkt` validated against recorded chains; buckets frozen; exit-rule characterization.

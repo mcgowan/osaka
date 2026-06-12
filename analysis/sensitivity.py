@@ -79,10 +79,8 @@ def main():
             s_pc = r["vix1d_anchor"] / 100.0
             base = p_mkt(r["strike"], r["spot"], s_pc, T, r["side"],
                          SNAP_MIN[r["snap_pt"]])
-            pert = no_touch_prob(
-                r["strike"], r["spot"],
-                scale * (base_sigma := s_pc) * 0 + scale * _f(r) * s_pc,
-                T, r["side"])
+            pert = no_touch_prob(r["strike"], r["spot"],
+                                 scale * _f(r) * s_pc, T, r["side"])
             shifts.append(abs(pert - base))
         print(f"  scale {scale}: median |d p_mkt| {median(shifts):.4f}  "
               f"mean {mean(shifts):.4f}  (n={len(shifts)})")

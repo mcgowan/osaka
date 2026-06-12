@@ -12,6 +12,10 @@ market-implied survival was at those moments.
 
 Run:  .venv/bin/python analysis/exit_characterization.py
 Output: analysis/exit_characterization.csv + printed tables for docs/calibration.md
+
+Settlement caveat: "settle" is the 15:59 ET bar close (13:00-session close on
+half days) as a proxy for the official SPXW PM settlement print. The two can
+differ by a few tenths of a point; immaterial for these statistics.
 """
 
 import csv
@@ -28,7 +32,10 @@ from quant.conventions import SigmaAnchor, time_to_settle  # noqa: E402
 from quant.distance import normalized_distance  # noqa: E402
 from quant.pmkt import p_mkt  # noqa: E402
 
-LOG_GLOB = "/Users/michael/GitHub/eleuthera/analyzer/logs/*.log"
+LOG_GLOB = os.environ.get(
+    "OSAKA_TRADE_LOGS",
+    os.path.join(os.path.dirname(__file__), "..", "..", "eleuthera",
+                 "analyzer", "logs", "*.log"))
 OUT = os.path.join(os.path.dirname(__file__), "exit_characterization.csv")
 PT_TO_ET = timedelta(hours=3)
 TERCILES = (11.0, 14.7)  # frozen full-history VIX1D cutoffs (docs/calibration.md)

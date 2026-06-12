@@ -5,11 +5,7 @@ Changing any of these invalidates buckets, grid, and p_mkt together - they
 are deliberately in one place so they cannot drift apart.
 """
 
-import os
-import sys
 from datetime import datetime, time
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 # --- time convention -------------------------------------------------------
 # Calendar-time year fraction. Matches the convention IB's own greeks use
@@ -106,13 +102,34 @@ SIGMA_ANCHOR_MODE = "prior_close"
 
 def time_to_settle(ts, is_half_day=False):
     """Year-fraction from bar timestamp ts (naive ET datetime) to settlement.
-    Raises if ts is at/after settlement - querying a settled option is a bug."""
+    Raises if ts is at/after settlement - querying a settled option is a bug.
+
+    CONTRACT (foot-gun): the caller MUST thread is_half_day from the
+    calendar. Forgetting it on a half day silently inflates T by 3 hours,
+    corrupting D features and p_mkt (labels are sigma-free and immune).
+    Prefer time_to_settle_cal(), which looks the flag up itself, unless you
+    are in a hot loop and have already joined the calendar.
+    """
     settle = datetime.combine(ts.date(),
                               SETTLE_HALF if is_half_day else SETTLE_FULL)
     seconds = (settle - ts).total_seconds()
     if seconds <= 0:
         raise ValueError(f"{ts} is at/after settlement {settle}")
     return seconds / YEAR_SECONDS
+
+
+_HALF_DAYS = None
+
+
+def time_to_settle_cal(ts):
+    """Calendar-aware time_to_settle: looks up is_half_day from the load
+    API itself (cached after first call). The safe default for one-off use."""
+    global _HALF_DAYS
+    if _HALF_DAYS is None:
+        from data.loader import load_calendar
+        cal = load_calendar()
+        _HALF_DAYS = set(cal[cal["is_half_day"]]["date"].dt.strftime("%Y-%m-%d"))
+    return time_to_settle(ts, is_half_day=ts.strftime("%Y-%m-%d") in _HALF_DAYS)
 
 
 class SigmaAnchor:

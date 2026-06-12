@@ -181,6 +181,38 @@ def test_p_mkt_baseline_vs_uncorrected():
         no_touch_prob(7550, S, sigma_c, T_3H, "p"), abs=1e-15)
 
 
+def test_p_mkt_composite_monotonicity():
+    """The model's monotone constraint will lean on p_mkt behaving sensibly
+    THROUGH the f(t) correction, not just on the raw formula. Two composite
+    properties across the session clock:
+    1. fixed strike, advancing clock (T shrinks as minutes grow): survival
+       non-decreasing - even where f(t) is locally rising (calls after 210').
+    2. fixed clock: survival monotone in strike distance."""
+    from quant.pmkt import p_mkt
+    for side, K in (("p", 7550.0), ("c", 7650.0)):
+        ps = []
+        for m in range(5, 386, 5):
+            T = (390 - m) * 60 / YEAR_SECONDS
+            ps.append(p_mkt(K, S, SIGMA, T, side, m))
+        assert all(b >= a for a, b in zip(ps, ps[1:])), side
+        assert ps[-1] > ps[0]  # and it genuinely moves
+    # distance monotonicity at several clock points, through f(t)
+    for m in (5, 90, 210, 330):
+        T = (390 - m) * 60 / YEAR_SECONDS
+        for side, ks in (("p", range(7595, 7480, -5)), ("c", range(7605, 7720, 5))):
+            ps = [p_mkt(k, S, SIGMA, T, side, m) for k in ks]
+            assert all(b >= a for a, b in zip(ps, ps[1:])), (side, m)
+
+
+def test_time_to_settle_cal_half_day_lookup():
+    from quant.conventions import time_to_settle_cal
+    # 2024-07-03 was a 13:00 ET close; the wrapper must find that itself
+    assert time_to_settle_cal(datetime(2024, 7, 3, 12, 0)) == pytest.approx(
+        time_to_settle(datetime(2024, 7, 3, 12, 0), is_half_day=True))
+    # and a normal day settles at 16:00
+    assert time_to_settle_cal(datetime(2026, 6, 1, 13, 0)) == pytest.approx(T_3H)
+
+
 def test_pmkt_against_monte_carlo():
     """Verify the reflection formula against simulated GBM paths.
 
