@@ -26,7 +26,7 @@ def test_manifest_lists_all_built_datasets():
 
 @pytest.mark.parametrize("symbol", ["SPX", "VIX", "VIX1D"])
 def test_minute_bars_sorted_unique_rth(symbol):
-    df = load_bars(symbol, start="2026-06-01", end="2026-06-05")
+    df = load_bars(symbol, start="2025-06-02", end="2025-06-06")
     assert df["ts"].is_monotonic_increasing
     assert not df["ts"].duplicated().any()
     hhmm = df["ts"].dt.strftime("%H:%M")
@@ -36,7 +36,7 @@ def test_minute_bars_sorted_unique_rth(symbol):
 
 
 def test_spx_full_day_has_390_bars():
-    df = load_bars("SPX", start="2026-06-01", end="2026-06-01")
+    df = load_bars("SPX", start="2025-06-02", end="2025-06-02")
     assert len(df) == 390
     assert df["ts"].iloc[0].strftime("%H:%M") == "09:30"
     assert df["ts"].iloc[-1].strftime("%H:%M") == "15:59"
@@ -61,13 +61,37 @@ def test_closed_day_junk_dropped():
 def test_vix1d_universe_start():
     days = trading_days("VIX1D")
     assert days[0] == "2023-04-26"
-    assert len(days) > 780
+    assert len(days) > 640  # pre-TEST_START span
+
+
+def test_locked_test_period_guard():
+    from data.loader import TEST_START
+    # default loads stop strictly before the boundary
+    df = load_bars("SPX")
+    assert df["ts"].max() < pd.Timestamp(TEST_START)
+    # even an explicit request for locked dates returns nothing
+    df = load_bars("SPX", start="2026-01-05", end="2026-01-09")
+    assert len(df) == 0
+    # the sanctioned escape hatch serves the full span
+    df = load_bars("SPX", start="2026-01-05", end="2026-01-09",
+                   _unlocked_full_span=True)
+    assert len(df) > 0
+
+
+def test_labels_locked_guard():
+    from data.labels import load_labels
+    from data.loader import TEST_START
+    df = load_labels(stride=5)
+    assert df["day"].max() < TEST_START
+    full = load_labels(stride=5, _unlocked_full_span=True)
+    assert full["day"].max() > TEST_START
+    assert len(full) > len(df)
 
 
 def test_date_bounds_inclusive():
-    df = load_bars("SPX", start="2026-06-01", end="2026-06-02")
+    df = load_bars("SPX", start="2025-06-02", end="2025-06-03")
     got = sorted(df["ts"].dt.strftime("%Y-%m-%d").unique())
-    assert got == ["2026-06-01", "2026-06-02"]
+    assert got == ["2025-06-02", "2025-06-03"]
 
 
 def test_unknown_dataset_rejected():

@@ -6,6 +6,16 @@ x both sides: collect (D, |recorded delta|) pairs near the money, then
 interpolate the normalized distance D at target deltas. Aggregate to fix
 the per-side bucket edges (incl. the band of record) in D units.
 
+FROZEN PRE-LOCK CALIBRATION (redteam F6, trader-ratified): the Phase-1
+config this script produced (GRID_ANCHORS, BUCKET_EDGES_D) was fit on the
+full 2024-12->2026-06 chain span, which straddles TEST_START. The overlap
+is documented rather than refit (refitting would reopen Gate 1; the
+contamination direction is conservative for the edge claim). This script
+therefore reads FULL-SPAN data via _unlocked_full_span=True so that
+re-running it reproduces the frozen values exactly. Do NOT refit the
+frozen config from a truncated run; any post-lock recalibration is a
+Gate-1 reopening with its own review.
+
 Run:   .venv/bin/python analysis/delta_mapping.py            # extract + summarize
        .venv/bin/python analysis/delta_mapping.py --summarize  # reuse CSV
 
@@ -69,10 +79,11 @@ def d_at_target_deltas(pairs, targets):
 
 
 def extract():
-    anchor = SigmaAnchor()  # prior_close, the frozen default
+    # full-span: reproduces the frozen pre-lock Phase-1 fit (see header)
+    anchor = SigmaAnchor(_unlocked_full_span=True)
     cal = load_calendar()
     half = set(cal[cal["is_half_day"]]["date"].dt.strftime("%Y-%m-%d"))
-    spx = load_bars("SPX", start="2024-12-01")
+    spx = load_bars("SPX", start="2024-12-01", _unlocked_full_span=True)
     spx_open = {ts.strftime("%Y-%m-%d %H:%M"): o
                 for ts, o in zip(spx["ts"], spx["open"])}
 

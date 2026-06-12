@@ -52,7 +52,8 @@ def main():
                 if ent:
                     trades.append((ent, e))
 
-    spx = load_bars("SPX")
+    # sanctioned full-span reader (FR-5.3 trade-log analysis; Phase S record)
+    spx = load_bars("SPX", _unlocked_full_span=True)
     spx["day"] = spx["ts"].dt.strftime("%Y-%m-%d")
     by_day = dict(tuple(spx.groupby("day")))
 

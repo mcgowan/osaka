@@ -13,6 +13,13 @@ sample as task 1.3. Also fits a time-of-day correction f(t) on odd-indexed
 days (median IV/anchor ratio per snapshot, per side) and reports held-out
 (even-day) bias reduction, to decide raw-anchor vs f(t)-corrected baseline.
 
+FROZEN PRE-LOCK CALIBRATION (redteam F6, trader-ratified): F_T_KNOTS was
+fit on the full 2024-12->2026-06 chain span, which straddles TEST_START.
+Documented rather than refit (would reopen Gate 1; f(t) contamination
+hardens the baseline, i.e. is conservative for the edge claim). This
+script reads FULL-SPAN data via _unlocked_full_span=True so re-running
+reproduces the frozen values exactly. Do NOT refit from a truncated run.
+
 Run:  .venv/bin/python analysis/baseline_validation.py [--summarize]
 Output: analysis/baseline_validation.csv + printed tables for docs/calibration.md
 """
@@ -37,10 +44,11 @@ PT_TO_ET = timedelta(hours=3)
 
 
 def extract():
-    anchor = SigmaAnchor()
+    # full-span: reproduces the frozen pre-lock Phase-1 fit (see header)
+    anchor = SigmaAnchor(_unlocked_full_span=True)
     cal = load_calendar()
     half = set(cal[cal["is_half_day"]]["date"].dt.strftime("%Y-%m-%d"))
-    spx = load_bars("SPX", start="2024-12-01")
+    spx = load_bars("SPX", start="2024-12-01", _unlocked_full_span=True)
     spx_open = {ts.strftime("%Y-%m-%d %H:%M"): o
                 for ts, o in zip(spx["ts"], spx["open"])}
 

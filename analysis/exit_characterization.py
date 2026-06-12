@@ -38,13 +38,9 @@ LOG_GLOB = os.environ.get(
                  "analyzer", "logs", "*.log"))
 OUT = os.path.join(os.path.dirname(__file__), "exit_characterization.csv")
 PT_TO_ET = timedelta(hours=3)
-TERCILES = (11.0, 14.7)  # frozen full-history VIX1D cutoffs (docs/calibration.md)
 SIDE_MAP = {"bull": "p", "bear": "c"}  # bull put spread / bear call spread
 
-
-def tercile(vix1d):
-    return "calm" if vix1d < TERCILES[0] else (
-        "mid" if vix1d < TERCILES[1] else "elevated")
+from quant.conventions import regime as tercile  # noqa: E402
 
 
 def load_trades():
@@ -64,10 +60,12 @@ def load_trades():
 
 
 def main():
-    anchor = SigmaAnchor()
+    anchor = SigmaAnchor(_unlocked_full_span=True)  # FR-5.3 sanctioned
     cal = load_calendar()
     half = set(cal[cal["is_half_day"]]["date"].dt.strftime("%Y-%m-%d"))
-    spx = load_bars("SPX", start="2024-12-01")
+    # sanctioned full-span reader: FR-5.3 mandates contact with the complete
+    # trade log (incl. post-TEST_START trades); no model metrics computed here
+    spx = load_bars("SPX", start="2024-12-01", _unlocked_full_span=True)
     spx["day"] = spx["ts"].dt.strftime("%Y-%m-%d")
     by_day = dict(tuple(spx.groupby("day")))
 

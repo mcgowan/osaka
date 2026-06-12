@@ -8,6 +8,10 @@ Timestamps are US/Pacific. DBL_MAX (~1.8e308) = IB "unset".
 ROLE BOUNDARY (CLAUDE.md): chains are validation/calibration/ablation data
 ONLY. Nothing in the label pipeline or core feature set may import this
 module — the leakage-redteam agent checks for exactly that.
+
+NO TEST_START GUARD: this module is NOT truncated at the locked test
+boundary (see data/loader.py lock docstring). Locked-period chain data is
+readable here; do not assume otherwise when writing analyses.
 """
 
 import bisect

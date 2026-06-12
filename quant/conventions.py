@@ -45,6 +45,18 @@ BUCKET_EDGES_D = {  # side -> (D at 0.05, 0.10, 0.15, 0.25 delta)
 BUCKET_LABELS = ("lt05", "05-10", "10-15", "15-25", "gt25")
 BAND_OF_RECORD = "10-15"
 
+# VIX1D regime tercile cutoffs for ANALYSIS/EVALUATION slicing only (never a
+# model feature - features use trailing windows per the point-in-time rule).
+# Fitted on pre-TEST_START daily closes only (652 days, 2023-04->2025-11;
+# recomputed at the Phase 2 leakage remediation - was 11.0/14.7 full-span).
+REGIME_TERCILES = (10.8, 14.6)
+
+
+def regime(vix1d_level):
+    """'calm' / 'mid' / 'elevated' for a VIX1D level. Analysis slicing only."""
+    return ("calm" if vix1d_level < REGIME_TERCILES[0]
+            else "mid" if vix1d_level < REGIME_TERCILES[1] else "elevated")
+
 
 # --- p_mkt vol correction f(t) (FR-5.1, frozen by task 1.4) ------------------
 # The raw prior-close VIX1D anchor understates the market's effective
@@ -141,12 +153,15 @@ class SigmaAnchor:
     Returns decimal vol (VIX1D 12.3 -> 0.123).
     """
 
-    def __init__(self, mode=SIGMA_ANCHOR_MODE):
+    def __init__(self, mode=SIGMA_ANCHOR_MODE, _unlocked_full_span=False):
+        # _unlocked_full_span: sanctioned full-span callers only (dataset
+        # builders / FR-5.3 scripts) - see data/loader.py docstring, rule #3
         from data.loader import load_bars
         if mode not in ("prior_close", "day_open"):
             raise ValueError(f"unknown sigma anchor mode {mode}")
         self.mode = mode
-        daily = load_bars("VIX1D", freq="1day")
+        daily = load_bars("VIX1D", freq="1day",
+                          _unlocked_full_span=_unlocked_full_span)
         days = daily["ts"].dt.strftime("%Y-%m-%d").tolist()
         if mode == "prior_close":
             # value for day i = close of day i-1

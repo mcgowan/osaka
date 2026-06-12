@@ -27,9 +27,24 @@ Load (the API):
     load_bars verifies the parquet's sha256 against the manifest on every
     call, so silently regenerated/corrupted datasets fail loudly.
 
-Note on the locked test set (inviolable rule #3): the final test period is
-not yet defined (Phase 4 carves it). When it is, the date guard goes HERE,
-in load_bars, plus the eval/final_eval.py allowlist — not in callers.
+LOCKED TEST SET (inviolable rule #3): TEST_START below is the test-period
+boundary, declared 2026-06-11 after a leakage-redteam BLOCK (Phase 2 review
+finding F1). load_bars and data.labels.load_labels TRUNCATE at TEST_START by
+default. The escape hatch `_unlocked_full_span=True` exists ONLY for:
+  (a) dataset builders (they write locked-period artifacts without analyzing
+      them),
+  (b) FR-5.3 trade-log validation scripts (mandated full-log contact, no
+      model metrics),
+  (c) eval/final_eval.py in Phase 5.
+Every new use of the kwarg is a leakage-redteam review item (it is named to
+be greppable). The boundary can never move later; ratified at Gate 2.
+
+NOT gated: data/chains.py reads the eleuthera archive directly, so
+locked-period CHAIN data is freely readable. The lock rests entirely on
+this module's SPX/VIX1D truncation. Chains are role-bounded to
+calibration/validation (never pipeline inputs), which is why this is
+acceptable — but any analysis that combines locked-period chains with
+model-relevant conclusions needs redteam review.
 """
 
 import hashlib
@@ -46,6 +61,7 @@ OUT_DIR = os.path.join(DATA_DIR, "processed")
 MANIFEST = os.path.join(OUT_DIR, "manifest.json")
 
 LOADER_VERSION = 1
+TEST_START = "2025-12-01"   # locked test boundary - see module docstring
 SYMBOLS = ("SPX", "VIX", "VIX1D")
 FREQS = ("1min", "1day")
 COLS = ["open", "high", "low", "close"]
@@ -239,10 +255,14 @@ def load_manifest():
         return json.load(f)
 
 
-def load_bars(symbol, freq="1min", start=None, end=None):
+def load_bars(symbol, freq="1min", start=None, end=None,
+              _unlocked_full_span=False):
     """Canonical bar access. Returns a DataFrame with columns
     [ts, open, high, low, close], ts ascending, ET timestamps, RTH only.
-    start/end are inclusive 'YYYY-MM-DD' date bounds."""
+    start/end are inclusive 'YYYY-MM-DD' date bounds.
+
+    Rows on/after TEST_START are EXCLUDED unless _unlocked_full_span=True
+    (sanctioned callers only - see module docstring; rule #3)."""
     if symbol not in SYMBOLS or freq not in FREQS:
         raise ValueError(f"unknown dataset {symbol}-{freq}")
     key = f"{symbol}-{freq}"
@@ -255,6 +275,8 @@ def load_bars(symbol, freq="1min", start=None, end=None):
             f"{key}.parquet does not match the manifest hash - "
             f"rebuild via 'loader.py build' (never edit parquet in place)")
     df = pd.read_parquet(path)
+    if not _unlocked_full_span:
+        df = df[df["ts"] < pd.Timestamp(TEST_START)]
     if start is not None:
         df = df[df["ts"] >= pd.Timestamp(start)]
     if end is not None:
