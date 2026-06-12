@@ -103,6 +103,59 @@ wider brackets: puts {0.35, …, 5.60}, calls {0.32, …, 5.00}.
 far-wing days; the 0.05Δ wing is explicitly non-blocking per the Phase S
 memo). Cost: 7 anchors/side instead of 5 → training table grows ~40%.
 
+## Task 1.6 — exit-rule characterization (2026-06-11)
+
+**Method:** all 294 logged spreads (eleuthera replay) with the frozen Phase-1
+machinery evaluated at entry and at exit: normalized distance D, the p_mkt
+baseline, then label-side facts (touch after exit, settle-beyond,
+held-to-settle P&L). Code: `analysis/exit_characterization.py` (+ CSV).
+
+**Entry profile:** median D at entry 2.13, median p_mkt at entry 0.814 —
+the system enters at ≈0.10–0.12Δ-equivalent strikes, squarely in the band
+of record. The evaluation focus is confirmed correct.
+
+**Exit profiles:**
+- `risk_off_reversal` (n=130) fires on *vol state*, not price proximity:
+  median D at exit ≈ 2.0–2.2 (barely closer than entry), median p_mkt at
+  exit 0.80–0.86, only 9–36% ever touch afterward. Cost by regime: calm
+  +$33k, mid −$50k (the rule EARNED its keep here — contains the crash-day
+  saves), elevated +$81k (worst whipsaw tax: elevated-vol days price wide
+  moves that revert).
+- `sr_inner_breach` (n=36) is genuinely price-driven: median D at exit
+  1.1–1.6, p_mkt 0.53–0.75, touch-after-exit up to 75% in elevated regime.
+
+**The discrimination table (the model's job, quantified):**
+
+| p_mkt at exit | n | actually settled safe | cost of exiting |
+|---|---|---|---|
+| <0.50 | 5 | 60% | +$11k |
+| 0.50–0.70 | 32 | 75% | −$41k |
+| 0.70–0.85 | 73 | **96%** | **+$138k** |
+| ≥0.85 | 56 | 93% | −$30k |
+
+Two lessons: (a) the bulk of the exit cost sits where the market already
+said "fine" (0.70–0.85) — a p_mkt-threshold override alone would have
+captured most of the prize on this sample; (b) but the ≥0.85 bucket shows
+why that's not enough — its 7% failures were catastrophic (crash days where
+the market was still complacent at exit time). The model must beat p_mkt
+*conditionally* — that is the edge-residual thesis, now with a dollar sign.
+
+## Task 1.7 — sensitivity memo (2026-06-11)
+
+Code: `analysis/sensitivity.py`. Labels are σ-free by construction and not
+affected by anything below.
+
+| Perturbation | Effect | Verdict |
+|---|---|---|
+| σ anchor prior_close → day_open | median |ΔD|/D **29%**; **58%** of bucket labels reassigned; median |Δp_mkt| 0.086 | **High sensitivity — but a convention, not a fragility.** All Phase-1 calibrations were fitted under prior_close and absorb its level (f(t)'s ~1.7–1.87 includes the overnight VIX1D sawtooth). Mode is frozen with a warning in `conventions.py`: changing it requires re-running 1.3–1.5. |
+| f(t) knots ±5% (fit noise) | median |Δp_mkt| ≈ 0.024 in band of record | Small vs the documented baseline MAE (0.06–0.10). Not the dominant error. |
+| Bucket fidelity vs recorded delta | band of record: 38% exact, 92% within-one-bucket; recorded-delta IQR [0.094..0.164] | The "10-15" bucket truly captures the 0.10–0.15Δ region at its quartiles. Acceptable: buckets are evaluation slices; the model sees exact D. |
+
+**Conclusion:** nothing fragile in the frozen stack *given* the conventions;
+the one genuinely consequential choice (anchor mode) is locked and
+documented. Residual baseline noise carries into Phase 4/5 interpretation
+as already recorded under task 1.4.
+
 **Scope decision (NFR-3.4 amendment):** f(t) is part of the **p_mkt
 definition only**. The distance encoding, grid, and buckets stay on the raw
 anchor: their delta-faithfulness was achieved *empirically* in task 1.3

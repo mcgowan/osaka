@@ -94,10 +94,13 @@ def delta_bucket(D, side):
         return "15-25"
     return "gt25"
 
-# --- sigma anchor (FR-5.1 / task 1.4 decides final mode) -------------------
-# "prior_close" is the strictly point-in-time-safe default: available at
-# every bar including 09:30. "day_open" (first VIX1D print, ~09:31) is the
-# task 1.7 sensitivity variant.
+# --- sigma anchor (frozen; task 1.7 sensitivity memo) -----------------------
+# "prior_close" is the strictly point-in-time-safe choice: available at
+# every bar including 09:30. WARNING: the anchor mode is welded into every
+# Phase-1 calibration (1.3 mapping, f(t) knots, grid anchors, bucket edges
+# all fitted under prior_close; day_open shifts D by a median 29% and
+# reassigns 58% of bucket labels). Never change this without re-running
+# tasks 1.3-1.5 end to end.
 SIGMA_ANCHOR_MODE = "prior_close"
 
 
