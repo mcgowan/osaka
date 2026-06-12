@@ -2,7 +2,7 @@
 
 THE SPEC IS docs/feature-spec.md (SIGNED v1.1). 28 features; the FEATURES
 tuple below must match the spec sheet exactly - drift is a bug and
-tests/test_features.py asserts the column set.
+tests/test_lookahead.py::test_no_raw_levels_in_master asserts the column set.
 
 Information set at query bar t (global convention): completed bars 0..t-1
 of today + open(t) + completed prior days + day-constant anchors. Minute
@@ -38,7 +38,7 @@ from data.loader import OUT_DIR, load_bars, load_calendar, load_manifest  # noqa
 from quant.conventions import YEAR_SECONDS, SigmaAnchor  # noqa: E402
 from quant.pmkt import p_mkt  # noqa: E402
 
-SPEC_VERSION = "1.1"
+SPEC_VERSION = "1.2"
 ANNUALIZE_1MIN = math.sqrt(YEAR_SECONDS / 60.0)
 
 FEATURES = (
@@ -46,7 +46,7 @@ FEATURES = (
     "D", "side_c", "minutes_to_settle",
     # block 2 - clock & calendar
     "minutes_since_open", "day_of_week", "is_fomc", "is_cpi_nfp",
-    "is_opex", "is_half_day",
+    "is_opex", "is_opex_quarterly", "is_half_day",
     # block 3 - volatility state
     "vix1d_anchor", "vix1d_chg", "rv_ratio_today", "rv5d_ratio",
     "vix_term_ratio",
@@ -134,9 +134,10 @@ def minute_features(o, h, l, c, i, m0, close_y, sigma):
     return out
 
 
-def _daily_context(spx_daily, vix1d_daily, vix_daily):
+def _daily_context(spx_daily, vix1d_daily, vix_daily, half_days):
     """Per-day dict of completed-prior-day context. All values for day d use
-    data through d-1 only."""
+    data through d-1 only. half_days: set of 'YYYY-MM-DD' half sessions
+    (needed for YESTERDAY's session length in M0(yesterday), spec #24)."""
     sd = spx_daily.reset_index(drop=True)
     sd["day"] = sd["ts"].dt.strftime("%Y-%m-%d")
     tr = np.maximum(
@@ -163,6 +164,9 @@ def _daily_context(spx_daily, vix1d_daily, vix_daily):
             "close_y3": float(sd["close"].iloc[j - 4]) if j >= 4 else np.nan,
             "atr14": float(atr14.iloc[j]) if not np.isnan(atr14.iloc[j]) else np.nan,
             "prev_day": sd["day"].iloc[j - 1],
+            # YESTERDAY's session year-fraction (spec #24: M0(yesterday))
+            "t0_y": ((210 if sd["day"].iloc[j - 1] in half_days else 390)
+                     * 60 / YEAR_SECONDS),
         }
         # VIX1D anchor of yesterday (= close of the day before yesterday)
         k = np.searchsorted(v1_days, sd["day"].iloc[j - 1])
@@ -188,7 +192,8 @@ def build(stride=5):
     spx_daily = load_bars("SPX", freq="1day", _unlocked_full_span=True)
     vix1d_daily = load_bars("VIX1D", freq="1day", _unlocked_full_span=True)
     vix_daily = load_bars("VIX", freq="1day", _unlocked_full_span=True)
-    dctx = _daily_context(spx_daily, vix1d_daily, vix_daily)
+    half_set = set(cal[cal["is_half_day"]]["day"])
+    dctx = _daily_context(spx_daily, vix1d_daily, vix_daily, half_set)
 
     # per-day pooled 1-min return stats for rv5d
     day_list = sorted(bars_by_day)
@@ -225,13 +230,14 @@ def build(stride=5):
         else:
             rv5d = np.nan
 
-        m0_y = (ctxd["anchor_y"] * math.sqrt(t0) * ctxd["open_y"]
+        m0_y = (ctxd["anchor_y"] * math.sqrt(ctxd["t0_y"]) * ctxd["open_y"]
                 if not np.isnan(ctxd["anchor_y"]) else np.nan)
         day_feats = {
             "day_of_week": pd.Timestamp(day).dayofweek,
             "is_fomc": int(crow["is_fomc"]),
             "is_cpi_nfp": int(crow["is_cpi"] or crow["is_nfp"]),
             "is_opex": int(crow["is_opex_monthly"]),
+            "is_opex_quarterly": int(crow["is_opex_quarterly"]),
             "is_half_day": int(bool(lab["half_day"].iloc[0])),
             "vix1d_anchor": sigma * 100.0,
             "vix1d_chg": (math.log(ctxd["vix1d_prior_close"] / ctxd["vix1d_2back"])
