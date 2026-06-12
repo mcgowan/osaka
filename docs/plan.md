@@ -13,8 +13,9 @@
 | **S — Derived-Pricing Spike** | Tasks S.1–S.6 ✅ + addenda (stop-vs-touch gap; false-breakout economics). **Gate S ✅ passed 2026-06-11: trader chose the price-barrier restructure.** Labels = price facts; option pricing removed from the pipeline; delta-breach design shelved as v2. |
 | **0 — Data Foundation** | **All tasks ✅ (0.1–0.7). Gate 0 ready for trader review.** Late discovery: `eleuthera/events/` = 303 days of recorded chains; `eleuthera/analyzer/logs` = the 294-trade rule-behavior log. False-breakout cost measured: $77.6k over 301 days (`spike/memo.md` Addendum 2) — the project's economic case, quantified. |
 | **1 — Grid, Baseline & Validation** | **All tasks ✅, Gate 1 ✅ passed (trader sign-off 2026-06-11, post-review)** — evidence in `docs/calibration.md`. Frozen: σ convention, 7-anchor per-side grid, bucket edges, f(t)-corrected p_mkt baseline. |
-| **2 — Label Generation** | **All tasks ✅. Gate 2 ready for trader review**: eyeball `analysis/plots/` + ratify `TEST_START = 2025-12-01`. Labels: 847k rows/783 days (default loads serve pre-boundary 704k/651). Engine math-verifier VERIFIED (zero discrepancies, 8,174 rows); leakage-redteam BLOCK→remediated (test-set guard installed); spot-validation 128/128 independent + 294/294. |
-| **3–6** | Restructured at Gate S around price-barrier labels. Not started. |
+| **2 — Label Generation** | **All tasks ✅, Gate 2 ✅ passed (trader sign-off 2026-06-12)**. `TEST_START = 2025-12-01` ratified and enforced in the load APIs. Labels: 847k rows/783 days (default loads serve pre-boundary 704k/651). Engine math-verifier VERIFIED; redteam BLOCK→remediated; spot-validation 128/128 + 294/294. |
+| **3 — Feature Engineering** | In progress — 3.1 feature spec drafted, **awaiting trader review before any feature code** (per task 3.1). |
+| **4–6** | Not started. |
 
 Data inventory: SPX 1-min 2004→, VIX 1-min 2005→, VIX1D 1-min 2023-04-26→ (all IB, $0, audited via `data/qa_ib.py`); SPX/VIX daily; trader's 2026-06-01 full-chain recording (502 contracts) + SPX/VIX charts in `data/raw/`. Canonical access: `data/loader.py`.
 
@@ -82,7 +83,7 @@ Data inventory: SPX 1-min 2004→, VIX 1-min 2005→, VIX1D 1-min 2023-04-26→ 
 
 **Trader review round 2 (2026-06-12) addressed:** (1) Phase-1 calibration scripts (`delta_mapping.py`, `baseline_validation.py`) explicitly marked as frozen pre-lock reproductions — `_unlocked_full_span=True` with F6-decision headers, so re-runs reproduce the frozen config exactly instead of silently shrinking the sample; (2) chains-not-gated documented in both the lock docstring and `data/chains.py`; (3) label build now skip-and-logs session-integrity failures per day instead of aborting the whole build; (4) `label_stats.add_pmkt` uses canonical `time_to_settle` (no reinlined convention; output verified identical); (5) 2.3 realized-vs-p_mkt table labeled as a seeded 120k subsample; (6) Phase 3 watch-item recorded on task 3.5: normalize `closest_pts`, strip raw level columns before the feature table, truncation harness asserts absence.
 
-**Gate 2:** 2.3 statistics plausible; 2.4 disagreements all explained (none); visual audit signed off; **trader ratifies TEST_START = 2025-12-01**.
+**Gate 2: ✅ PASSED — trader sign-off 2026-06-12** (after review round 2). Visual audit accepted; **TEST_START = 2025-12-01 ratified**.
 
 ---
 
@@ -90,7 +91,7 @@ Data inventory: SPX 1-min 2004→, VIX 1-min 2005→, VIX1D 1-min 2023-04-26→ 
 
 **Goal:** The 20–30 feature columns, point-in-time-safe, each specified.
 
-- [ ] **3.1** Write the feature spec sheet first (name, formula, lookback, normalization, point-in-time rule) covering the FR-1 list: strike encoding, clock/calendar, vol state, today's tape, prior-day context. Trader reviews the spec before code.
+- [ ] **3.1** Write the feature spec sheet first (name, formula, lookback, normalization, point-in-time rule) covering the FR-1 list: strike encoding, clock/calendar, vol state, today's tape, prior-day context. Trader reviews the spec before code. *(**SIGNED v1.1, trader 2026-06-12** — 28 features (trader added `vix_term_ratio`, `dist_pdh`, `dist_pdl`; declined impulse/velocity → Phase 4 candidate). Hard constraints recorded: no volume/VWAP ever, no overnight SPX. pmkt-as-input conditional: without-pmkt variant first-class through 4.8; edge judged in band + slices, never pooled.)*
 - [ ] **3.2** Implement features against the load API. One function per feature, config-registered.
 - [ ] **3.3** Build the lookahead test harness (NFR-1.1): recompute every feature at bar t using data truncated at t; assert exact equality with the full-data computation, across many random (day, bar) pairs. This runs in CI on every change.
 - [ ] **3.4** Feature QA: distributions, NaN handling at day-open edges (several features are undefined in the first bars — define and document the policy), correlation matrix to spot redundancies.
@@ -110,9 +111,9 @@ Data inventory: SPX 1-min 2004→, VIX 1-min 2005→, VIX1D 1-min 2023-04-26→ 
 - [ ] **4.3** Train v1 GBT (LightGBM/XGBoost) with the monotone constraint on normalized distance (survival non-decreasing in distance); side as indicator (compare against two-head variant in 4.6).
 - [ ] **4.4** Hyperparameter search via the walk-forward validation folds only — small grid, heavy regularization priors given effective N ≈ days, not rows.
 - [ ] **4.5** Post-hoc calibration (isotonic or Platt) fit on a validation fold never used for model selection.
-- [ ] **4.6** Ablations on validation folds: side-indicator vs. two heads; with/without prior-day block; with/without p_mkt as input feature; feature-importance review and pruning of dead weight back toward the 20–30 budget.
+- [ ] **4.6** Ablations on validation folds: side-indicator vs. two heads **+ threat-frame sign convention (run together — same underlying question, per trader at spec sign-off)**; with/without prior-day block; with/without p_mkt as input feature **(without-pmkt is a FIRST-CLASS variant carried through 4.8 — trader condition)**; recent-impulse/velocity candidate feature targeted at the near-strike-stress slice; feature-importance review and pruning of dead weight back toward the 20–30 budget.
 - [ ] **4.7** Monotonicity verification: strike sweeps at sampled (day, bar) states; zero violations required.
-- [ ] **4.8** Residual analysis on validation: where does p_model − p_mkt concentrate (time of day, regime, day-type ingredients)? Does it look like signal or noise? Written up before touching the test set.
+- [ ] **4.8** Residual analysis on validation: where does p_model − p_mkt concentrate (time of day, regime, day-type ingredients)? Does it look like signal or noise? Written up before touching the test set. **Includes the without-pmkt variant as a first-class model (trader condition at spec sign-off); all edge claims judged in the band of record + NFR-2.1b slices, never pooled — pmkt-as-input can collapse the model onto the baseline and pooled Brier won't catch it.**
 
 **Gate 4:** Model beats baselines (b) and (c) on validation Brier in the 0.10–0.15Δ band; calibration curves acceptable per-bucket; monotonicity clean; residual write-up reviewed.
 
