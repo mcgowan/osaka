@@ -1,10 +1,11 @@
 # Feature Spec Sheet (task 3.1)
 
-**Status: SIGNED v1.1 — trader sign-off 2026-06-12** (v1 draft + trader
-additions #26–28 and the resolutions recorded at the bottom).
-This sheet is the contract: the spec doubles as the pipeline requirement
-(NFR-3.2), the code must match it exactly, and drift is a bug. **28
-features**, within the 20–30 budget (FR-1).
+**Status: SIGNED v1.2 — trader sign-off 2026-06-12** (v1.1 + Gate 3 review
+round: NaN-cell corrections #11/#24, block-count fixes, and trader decision
+(b) adding `is_opex_quarterly`). This sheet is the contract: the spec
+doubles as the pipeline requirement (NFR-3.2), the code must match it
+exactly, and drift is a bug. **29 features**, within the 20–30 budget
+(FR-1).
 
 **Hard constraints on the record (trader, 2026-06-12):** no volume in any
 form exists or may be approximated (no VWAP, no volume profile — SPX is a
@@ -47,10 +48,10 @@ only).
 | # | name | formula | lookback | normalization | PIT rule |
 |---|---|---|---|---|---|
 | 1 | `D` | (S−K)/(σ_a·√T·S), sign OTM-positive (puts), mirrored (calls) | none | implied-move units | S = open(t); σ_a day-constant (prior close); monotone-constrained input |
-| 2 | `side` | put=0 / call=1 indicator | none | categorical | static per row |
+| 2 | `side_c` | put=0 / call=1 indicator (string key column `side` also kept for joins) | none | categorical | static per row |
 | 3 | `minutes_to_settle` | session minutes remaining at t | none | minutes (390-scale) | from t + half-day calendar |
 
-## Block 2 — Clock & calendar (6)
+## Block 2 — Clock & calendar (7)
 
 | # | name | formula | lookback | normalization | PIT rule |
 |---|---|---|---|---|---|
@@ -58,15 +59,16 @@ only).
 | 5 | `day_of_week` | 0–4 | none | categorical | static |
 | 6 | `is_fomc` | calendar flag (decision day) | none | binary | known in advance |
 | 7 | `is_cpi_nfp` | calendar flag (CPI OR NFP release day) | none | binary | known in advance; combined to save budget — both are 08:30 ET pre-open prints |
-| 8 | `is_opex` | monthly OPEX flag (quarterly implied by month) | none | binary | known in advance |
+| 8 | `is_opex` | monthly OPEX flag (set on quarterly months too) | none | binary | known in advance |
 | 9 | `is_half_day` | calendar flag | none | binary | known in advance |
+| 29 | `is_opex_quarterly` | quarterly OPEX / triple-witching flag (3rd Friday of Mar/Jun/Sep/Dec) | none | binary | known in advance | *(added at Gate 3 review, trader decision (b): triple-witching pinning is structurally distinct for 0DTE and was previously indistinguishable from monthly OPEX)* |
 
-## Block 3 — Volatility state (4)
+## Block 3 — Volatility state (5)
 
 | # | name | formula | lookback | normalization | PIT rule | NaN |
 |---|---|---|---|---|---|---|
 | 10 | `vix1d_anchor` | prior-close VIX1D (vol points) | 1 day | already a vol quote | completed day | never |
-| 11 | `vix1d_chg` | ln(anchor_today / anchor_yesterday) | 2 days | log ratio | completed days | never |
+| 11 | `vix1d_chg` | ln(anchor_today / anchor_yesterday) | 2 days | log ratio | completed days | NaN first universe day |
 | 12 | `rv_ratio_today` | RV(open→t) ÷ σ_a | today, ≥15 completed bars | ratio | bars 0..t−1 only | NaN before minute 15 |
 | 13 | `rv5d_ratio` | RV over prior 5 completed sessions ÷ σ_a | 5 days | ratio | completed days | never |
 
@@ -90,14 +92,14 @@ missing — otherwise all level-and-realized — at near-zero cost.)*
 | 19 | `efficiency_ratio` | (close_last − open₀) ÷ Σ|5-min moves| on the rollup | today | [−1,1] | completed 5-min bars | NaN before minute 15 |
 | 20 | `open_drive` | (open(t) − open₀) ÷ M₀ | today | implied-move units | open(t) vs session open | never |
 
-## Block 5 — Prior-day context (5)
+## Block 5 — Prior-day context (7)
 
 | # | name | formula | lookback | normalization | PIT rule | NaN |
 |---|---|---|---|---|---|---|
 | 21 | `yest_close_pos` | (close_y − low_y) ÷ (high_y − low_y) | 1 day | [0,1] | completed day | never |
 | 22 | `open_vs_yest_range` | (open₀ − mid_y) ÷ ATR₁₄, where mid_y = (high_y+low_y)/2; encodes inside/above/below continuously | 1 day | ATR units | completed day + today's open | never |
 | 23 | `mom3d_atr` | (close_y − close_{y−3}) ÷ ATR₁₄ | 4 days | ATR units | completed days | never |
-| 24 | `yest_range_vs_implied` | (high_y − low_y) ÷ M₀(yesterday) | 1 day | ratio | completed day | never |
+| 24 | `yest_range_vs_implied` | (high_y − low_y) ÷ M₀(yesterday) | 1 day | ratio | completed day | NaN first universe day |
 | 25 | `pmkt` | the frozen baseline `quant.pmkt.p_mkt(...)` at (K, S, σ_a, T, t) | none | probability | same inputs as #1/#3 | never |
 
 | 27 | `dist_pdh` | (high_y − S(t)) ÷ M(t) | 1 day | implied-move units, market-framed (+ = level above spot) | high_y completed day; S = open(t); M(t) = σ_a·√T(t)·S(t), same denominator as D (rule #5) | never |
@@ -128,6 +130,26 @@ measured put-side bias and prove the correction is real where it matters.)*
 - Volume in any form (calculated index; no volume exists).
 - Any full-history percentile rank (lookahead; trailing windows only — none
   needed in v1).
+
+## QA addendum (task 3.4, 2026-06-12 — `analysis/feature_qa.py`)
+
+- **FR-1.3 RV-variant decision: keep the 1-min estimator.** RV_1min/RV_5min
+  median 0.989, IQR [0.94..1.04] over 60 sampled days — no microstructure
+  inflation (SPX is a calculated index; no bid-ask bounce).
+- **NaN corrections to the tables above:** #11 `vix1d_chg` and #24
+  `yest_range_vs_implied` are NaN on the first universe day (no 2-back
+  VIX1D close exists) — "never" was wrong; ~1 day affected.
+- **Correlation clusters (|ρ|>0.8), all by design, none pruned at this
+  stage:** `minutes_since_open`~`minutes_to_settle` (identity except half
+  days — both kept, √T is the physical driver); `D`~`pmkt` (+0.98 — pmkt
+  is a monotone transform of (D,T); this is precisely the
+  baseline-anchoring the trader's #25 condition polices);
+  `efficiency_ratio`~`open_drive`~`range_pos` (the trend-day cluster —
+  distinct tails matter); `vix1d_anchor`~`vix_term_ratio` (+0.84 — level
+  vs slope, decorrelates exactly when it matters). Budget pruning happens
+  at 4.6 with importance evidence, not here.
+- Distributions: no infs, no constants, tails sane (`dist_pdh/pdl` reach
+  ±20 implied-move units late-day as M(t) shrinks — expected geometry).
 
 ## Resolutions (trader sign-off, 2026-06-12)
 

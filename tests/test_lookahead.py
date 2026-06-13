@@ -68,11 +68,15 @@ def test_minute_features_on_truncated_bars(world):
     for r in world["sample"].itertuples():
         day_bars = world["spx"][world["spx"]["day"] == r.day]
         i = int(r.minute)
-        trunc = day_bars.iloc[: i + 1]  # bar i present only for its open
-        o = trunc["open"].to_numpy()
-        h = trunc["high"].to_numpy()
-        l = trunc["low"].to_numpy()
-        c = trunc["close"].to_numpy()
+        trunc = day_bars.iloc[: i + 1]
+        o = trunc["open"].to_numpy().copy()
+        h = trunc["high"].to_numpy().copy()
+        l = trunc["low"].to_numpy().copy()
+        c = trunc["close"].to_numpy().copy()
+        # POISON bar i's intra-bar values (redteam F1): only open(t) is in
+        # the information set; h/l/c of bar t complete AFTER the decision.
+        # Any feature reading them now propagates NaN and fails equality.
+        h[i] = l[i] = c[i] = np.nan
         sigma = r.vix1d_anchor / 100.0
         session_min = 210 if r.is_half_day else 390
         t0 = session_min * 60 / YEAR_SECONDS
@@ -115,6 +119,30 @@ def test_day_features_from_completed_days_only(world):
         assert eq(row["vix1d_chg"],
                   math.log(float(v1p["close"].iloc[-1]) / float(v1p["close"].iloc[-2])),
                   1e-9)
+        # --- redteam F2: the three previously-uncovered day features ---
+        # mom3d_atr: close_y minus close 3 sessions before yesterday
+        assert eq(row["mom3d_atr"],
+                  (float(prev["close"]) - float(past["close"].iloc[-4])) / atr14,
+                  1e-6)
+        # rv5d_ratio: pooled within-session 1-min returns, 5 sessions
+        # STRICTLY before today
+        prior5 = sorted(world["spx"][world["spx"]["day"] < day]["day"].unique())[-5:]
+        rets = np.concatenate([
+            np.diff(np.log(world["spx"][world["spx"]["day"] == d]["close"].to_numpy()))
+            for d in prior5])
+        sigma = row["vix1d_anchor"] / 100.0
+        rv5 = rets.std(ddof=1) * math.sqrt(YEAR_SECONDS / 60.0)
+        assert eq(row["rv5d_ratio"], rv5 / sigma, 1e-6)
+        # yest_range_vs_implied: M0(YESTERDAY) = anchor_y * sqrt(T0_y) * open_y,
+        # with YESTERDAY's session length and the anchor as of d-2 (spec #24)
+        cal = load_calendar()
+        half = set(cal[cal["is_half_day"]]["date"].dt.strftime("%Y-%m-%d"))
+        prev_day = str(past["day"].iloc[-1])
+        t0_y = (210 if prev_day in half else 390) * 60 / YEAR_SECONDS
+        anchor_y = float(v1[v1["day"] < prev_day]["close"].iloc[-1]) / 100.0
+        m0_y = anchor_y * math.sqrt(t0_y) * float(prev["open"])
+        assert eq(row["yest_range_vs_implied"],
+                  (float(prev["high"]) - float(prev["low"])) / m0_y, 1e-6)
 
 
 def test_row_features_from_prefix(world):
