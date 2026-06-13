@@ -6,7 +6,7 @@
 
 **Standing data constraint:** no options data is purchased. Labels are price facts from SPX 1-min bars (no option pricing in the pipeline, per Gate S); the only real chains are the trader's own recordings (`eleuthera/events/`), used for baseline validation and ablations only.
 
-## Status (as of 2026-06-11)
+## Status (as of 2026-06-13)
 
 | Phase | State |
 |---|---|
@@ -15,8 +15,9 @@
 | **1 — Grid, Baseline & Validation** | **All tasks ✅, Gate 1 ✅ passed (trader sign-off 2026-06-11, post-review)** — evidence in `docs/calibration.md`. Frozen: σ convention, 7-anchor per-side grid, bucket edges, f(t)-corrected p_mkt baseline. |
 | **2 — Label Generation** | **All tasks ✅, Gate 2 ✅ passed (trader sign-off 2026-06-12)**. `TEST_START = 2025-12-01` ratified and enforced in the load APIs. Labels: 847k rows/783 days (default loads serve pre-boundary 704k/651). Engine math-verifier VERIFIED; redteam BLOCK→remediated; spot-validation 128/128 + 294/294. |
 | **3 — Feature Engineering** | **All tasks ✅, Gate 3 ✅ passed (trader sign-off 2026-06-12)**. Spec v1.2, 29 features, master 847k rows, harness adversarially power-tested, redteam PASS (full + scoped). |
-| **4 — Modeling** | In progress. |
-| **5–6** | Not started. |
+| **4 — Modeling** | **All tasks ✅ (4.1–4.8); Gate 4 reviewed 2026-06-13.** Splits/eval-harness/baselines/monotone GBT, walk-forward tuning, ablations, residual analysis; 71 tests; leakage review PASS (via general-purpose agent — custom-agent sandbox stale). Verdict: monotonicity clean; a real regime-conditional **near-strike** edge; **but no stable band-of-record edge** (negative in calm/at open) and calibration misses ±3pt. Evidence `docs/modeling.md`. |
+| **5 — Final Evaluation** | **Gate 5: documented NO-GO (trader, 2026-06-13).** Kill criterion met on honest validation + real-economics checks (`docs/negative_result.md`); the model doesn't beat holding/the trader's rules where the strategy operates. **Locked test deliberately left unspent.** |
+| **6 — Shadow** | Not entered (no-go). |
 
 Data inventory: SPX 1-min 2004→, VIX 1-min 2005→, VIX1D 1-min 2023-04-26→ (all IB, $0, audited via `data/qa_ib.py`); SPX/VIX daily; trader's 2026-06-01 full-chain recording (502 contracts) + SPX/VIX charts in `data/raw/`. Canonical access: `data/loader.py`.
 
@@ -132,21 +133,37 @@ Minors: stale `# PROVISIONAL` tag on `breakout_retest` reconciled; `gbt.train` n
 - **`is_opex` Thursday-holiday backlog item** (carried from Gate 3) still open — non-blocking.
 - **leakage-redteam review gate — custom-agent sandbox is stale; review routed via general-purpose.** Diagnosed 2026-06-13: the `leakage-redteam` subagent (and presumably the other custom file-defined agents, `math-verifier`/`feature-implementer`) executes in a **separate, stale/synthetic clone** of the repo — same path string, different sandbox — frozen near the Phase-3 state (HEAD 076a8ff, a phantom `src/` dir, divergent commit history, a different `data/loader.py`, future-dated files). It does NOT see the live working tree or new commits/branches; committing to `phase-4-modeling` did not surface the code to it (no shared remote it can fetch). When asked to review absent files it hallucinates plausible-but-wrong source (this produced the "fabricated review" symptom; the Phase 1–3 redteam reviews worked only because that committed code exists in its ≤Phase-3 snapshot). `general-purpose` agents DO run in the live working tree (verified: read the real 209-line `splits.py` + correct md5). **Resolution: the independent adversarial leakage review is run through a `general-purpose` agent carrying the full `leakage-redteam` charter + NFR-1 attack checklist, against the real code.** Main-agent self-review already PASSED that checklist. (Infra follow-up for the trader: the custom-agent sandbox needs fixing before `leakage-redteam`/`math-verifier` can be used directly again.)
 
-**Gate 4: READY FOR TRADER REVIEW (2026-06-13).** Evidence: `docs/modeling.md` (4.1–4.8 record), `models/` + `analysis/`, 71 tests green, leakage review PASS (via general-purpose agent; custom-agent sandbox stale). **Verdict is mixed, not a clean pass:** monotonicity ✅; near-strike false-breakout edge real & stable across OOF/CALIB/VALID (the trader's discrimination use case); **but the Section-8 PRIMARY criterion is NOT met — no stable band-of-record edge** (negative in calm regimes and at the session open; positive only in elevated vol / recent periods), and **calibration ±3pt not met** (isotonic drifts CALIB→VALID). The edge is signal-shaped and regime-conditional (concentrated where p_mkt is weakest). **Trader decision required:** (a) proceed to the one-shot Phase-5 locked-test run on the strength of the conditional near-strike/elevated-vol edge (locked period Dec 2025+ = most-elevated window, a fair test), or (b) the unstable headline band edge triggers the pre-registered documented-negative-result path. Do not move the pre-registered goalposts either way.
+**Gate 4: READY FOR TRADER REVIEW (2026-06-13).** Evidence: `docs/modeling.md` (4.1–4.8 record), `models/` + `analysis/`, 71 tests green, leakage review PASS (via general-purpose agent; custom-agent sandbox stale). **Verdict is mixed, not a clean pass:** monotonicity ✅; near-strike false-breakout edge real & stable across OOF/CALIB/VALID (the trader's discrimination use case); **but the Section-8 PRIMARY criterion is NOT met — no stable band-of-record edge** (negative in calm regimes and at the session open; positive only in elevated vol / recent periods), and **calibration ±3pt not met** (isotonic drifts CALIB→VALID). The edge is signal-shaped and regime-conditional (concentrated where p_mkt is weakest). **Trader decision (2026-06-13): path (b) — documented NO-GO** (see Phase 5 + `docs/negative_result.md`), reinforced by the real-chain exit-economics checks. The locked test is left unspent.
 
 ---
 
-## Phase 5 — Final Evaluation (one shot)
+## Phase 5 — Final Evaluation
 
 **Goal:** The honest answer, against the pre-registered criteria.
 
-- [ ] **5.1** Freeze: model artifact, calibrator, feature code, grid anchors, bucket boundaries, p_mkt parameters — all hashed and recorded.
-- [ ] **5.2** Single run on the locked test period. No iteration. (If something is broken, fix the bug, document it, and the re-run is itself documented — but no tuning against test results.)
-- [ ] **5.3** Evaluate Section-8 success criteria: per-bucket calibration (±3 pts in 0.10–0.15Δ); Brier vs. p_mkt baseline with sub-period stability; pooled-mean agreement; monotonicity.
-- [ ] **5.4** Rough economic check: approximate spread P&L simulation (BS on spot + VIX1D, no chains needed) comparing "trade everything" vs. "filter/side-select by model probability." This is indicative, not a backtest of record.
-- [ ] **5.5** Go/no-go decision against the kill criterion. If killed: write the negative-result memo (what was tested, why delta proved sufficient, what would change the answer) and stop.
+**RESOLVED — documented NO-GO (trader, 2026-06-13). See `docs/negative_result.md`.**
+The kill criterion is met on honest validation + real-economics checks: the edge
+residual is not tradeable where the v1 strategy operates. The locked test is
+**deliberately left unspent** (it confirms promising results; spending it to
+confirm a negative the validation already shows would waste the one-shot — it
+stays available for a v2 thesis). So 5.1/5.2/5.3 (the locked-test run) are NOT
+executed by design; the go/no-go (5.5) is decided from Phase-4 validation and
+the trade-log economics.
 
-**Gate 5:** Documented go or documented no-go. Both are successful project outcomes.
+- [—] **5.1–5.3** Locked-test freeze + single run + Section-8 eval — **not run**
+  (no-go decided pre-locked-test; the test set stays unspent).
+- [x] **5.4** Economic check (done, exceeded scope): false-breakout veto overlay
+  (`analysis/model_exit_overlay.md`) and a model-driven exit policy marked on the
+  trader's **real recorded chains** (`analysis/model_exit_policy.md`) — both show
+  the model does not beat holding / the trader's rules; BS-on-VIX1D proved
+  unusable (+$197k artifact), so real chains were used.
+- [x] **5.5** Go/no-go: **NO-GO**, negative-result memo written
+  (`docs/negative_result.md`): what was tested, the three converging tests, why
+  delta proved sufficient (the real near-strike edge lives in a regime the v1
+  far-OTM strategy rarely reaches and never exits in), and the v2 candidates.
+
+**Gate 5: ✅ documented NO-GO (trader, 2026-06-13).** A successful project
+outcome per requirements §8. Phase 6 (shadow) is not entered.
 
 ---
 

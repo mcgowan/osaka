@@ -81,6 +81,38 @@ def contract_asof(day, strike, side, snaps_pt, max_stale=timedelta(minutes=10)):
     return out
 
 
+def contract_quote_asof(day, strike, side, snaps_pt,
+                        max_stale=timedelta(minutes=10)):
+    """Last valid (bid, ask, mark, ts) at/before each PT snapshot for one
+    contract. Row cols: 0=ts,1=bid,2=ask,3=last,...,9=mark. Rows with an unset
+    or non-positive bid/ask are skipped (can't form a mid)."""
+    from datetime import datetime
+
+    path = os.path.join(ARCHIVE, day, f"{day}-{strike}-{side}.csv")
+    if not os.path.exists(path):
+        return {}
+    rows = []
+    with open(path) as f:
+        for row in csv.reader(f):
+            try:
+                bid, ask, mark = float(row[1]), float(row[2]), float(row[9])
+            except (ValueError, IndexError):
+                continue
+            if bid >= MISSING or ask >= MISSING or bid <= 0 or ask <= 0:
+                continue
+            rows.append((datetime.strptime(row[0][:19], "%Y-%m-%d %H:%M:%S"),
+                         bid, ask, mark))
+    rows.sort(key=lambda r: r[0])
+    ts_list = [r[0] for r in rows]
+    out = {}
+    for snap in snaps_pt:
+        i = bisect.bisect_right(ts_list, snap)
+        if i > 0 and snap - rows[i - 1][0] <= max_stale:
+            _, b, a, mk = rows[i - 1]
+            out[snap] = (b, a, mk, rows[i - 1][0])
+    return out
+
+
 def chain_asof(day, snaps_pt, lo, hi, max_stale=timedelta(minutes=10)):
     """As-of view of all contracts in [lo, hi] at each PT snapshot.
 
