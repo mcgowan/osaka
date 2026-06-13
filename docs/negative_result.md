@@ -43,20 +43,40 @@ recorded chain mids: the policy is **dead last** — +$32k vs always-hold +$117k
 vs the actual rules +$83k (held-out). **No threshold beats holding to
 settlement.** (BS-on-VIX1D had overstated it by +$197k — a pure pricing
 artifact; the real-chain re-mark, demanded before any write-off, removed the
-illusion.) Again 0 exits in the near-strike regime.
+illusion.)
 
-## Why delta (p_mkt) proved sufficient
+**3b. Isolated near-strike test (the decisive one).** Because (1)–(3) might
+"never give the edge its shot," we ran the edge exactly where it is validated:
+hold every trade until price enters the D≤0.5 zone, then let the model cut
+(exit iff D≤0.5 and p_model<p_mkt), on the 29 held-out trades that reach the
+zone, marked on real chains. The near-strike policy **loses to holding**
+(−$134,048 vs −$123,397; −$10,650) and is **far worse than the trader's own
+rules** (−$38,025). Its cuts are mostly wrong: **of 7 cuts, 5 cut false
+breakouts (winners), only 2 caught real breakouts.**
 
-At the points the strategy operates — selling ~0.10Δ spreads and managing them
-while the short strike is still 1–2+ implied-moves away (D>0.5) — the analytic
-VIX1D barrier baseline is as good as or better than the model, and in calm
-regimes strictly better. The model's one **real, validated edge is near-strike**
-(D≤0.5: significant across OOF/CALIB/VALID, mean residual +2.7pts correcting the
-put-skew premium) — but for far-OTM 0.10Δ spreads that regime is **rarely
-reached (17% of trades) and arrives late**, usually when the trade is already
-adverse, and the trader's exits never fire there. So a genuine edge exists in a
-corner of state space the v1 strategy doesn't live in. Delta was sufficient
-where it counts.
+## Why delta (p_mkt) proved sufficient — and the near-strike edge doesn't convert
+
+The model's one **real, validated edge is near-strike** (D≤0.5: positive Brier
+skill vs p_mkt across OOF/CALIB/VALID; mean residual +2.7pts correcting the
+put-skew premium). The decisive finding (test 3b) is that **a better-calibrated
+survival probability is not the ability to make profitable exit decisions.**
+The near-strike edge is a *hold-bias* — "survival is higher than the market
+implies," i.e. false breakouts recover — and **holding to settlement already
+captures that fully** (it rides out every recovery). To beat holding, a policy
+must *discriminate which* near-strike trades to **cut** (the real breakouts
+headed to max loss); the model cannot — cutting in the validated zone is wrong
+5 of 7 times and loses to holding. So the edge is real but **redundant with
+holding** and useless for the cut decision.
+
+Meanwhile, at the points the strategy actually operates — selling ~0.10Δ spreads
+and managing them while the short strike is still 1–2+ implied-moves away
+(D>0.5) — the analytic VIX1D baseline is as good as or better than the model
+(negative skill in calm and at the open). And on the genuinely dangerous trades
+that do reach the strike, **the trader's own exit rules manage them far better
+than the model** (−$38k vs −$134k model vs −$123k holding on the 29 near-strike
+trades). Delta was sufficient where the model has no edge; where the model has a
+(probability) edge, it doesn't translate into dollars, and the trader's existing
+rules already dominate. Hence: no-go.
 
 ## On the locked test (deliberately unspent)
 

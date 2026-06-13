@@ -200,6 +200,9 @@ def main():
         "p<0.60": lambda g: g["p_model"] < 0.60,
         "p<0.70": lambda g: g["p_model"] < 0.70,
         "p<0.80": lambda g: g["p_model"] < 0.80,
+        # near-strike-scoped: only cut IN the validated edge regime (D<=0.5)
+        "nearstrike D<=.5 & p<pmkt":
+            lambda g: (g["D"] <= 0.5) & (g["p_model"] < g["pmkt"]),
     }
     pnl = {r: [] for r in RULES}
     rule_exit = {r: {} for r in RULES}
@@ -289,6 +292,39 @@ def main():
     reach = ho_q[ho_q["D"] <= 0.5]["tid"].nunique()
     print(f"  near-strike reachability: {reach}/{len(ho_tids)} trades EVER reach "
           f"D<=0.5; {len(ho_q[ho_q['D']<=0.5])}/{len(ho_q)} stride-bars at D<=0.5")
+
+    # ---- ISOLATED near-strike-edge test (the right test): manage ONLY in the
+    # validated D<=0.5 zone, on the trades that actually reach it ----
+    rname = "nearstrike D<=.5 & p<pmkt"
+    reach = [tid for tid in ho.index
+             if (by_tid.get(tid) is not None
+                 and (by_tid[tid]["D"] <= 0.5).any())]
+    print("\n--- ISOLATED near-strike policy (HELD-OUT, real chains) ---")
+    print(f"  trades reaching D<=0.5: {len(reach)}")
+    nb_pnl = ah_pnl = act_pnl = 0.0
+    cut_real = cut_false = nexit = nmiss = 0
+    for tid in reach:
+        tr = tdf.loc[tid]
+        e = rule_exit[rname].get(tid)
+        cp = chain_pnl(tr, e)
+        if np.isnan(cp):
+            nmiss += 1
+            continue
+        nb_pnl += cp
+        ah_pnl += tr["held_pnl"]
+        act_pnl += tr["actual_pnl"]
+        if e is not None:
+            nexit += 1
+            # settle_ok==0 => real breakout (cutting it = good); ==1 => false (mistake)
+            if tr["settle_ok"] == 0:
+                cut_real += 1
+            else:
+                cut_false += 1
+    print(f"  (markable {len(reach) - nmiss}/{len(reach)})  near-strike policy "
+          f"{_d(nb_pnl)}   always-hold {_d(ah_pnl)}   actual {_d(act_pnl)}")
+    print(f"  near-strike − always-hold: {_d(nb_pnl - ah_pnl)}")
+    print(f"  cuts: {nexit} total  -> {cut_real} real breakouts (good), "
+          f"{cut_false} false breakouts (cut a winner)")
 
     print("\n--- sweep on REAL CHAINS (HELD-OUT; shape only, verdict=headline) ---")
     print(f"  baselines: always-hold {_d(ok['held_pnl'].sum())}   "

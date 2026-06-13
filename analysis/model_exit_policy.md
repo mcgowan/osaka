@@ -43,12 +43,28 @@ on $117k) gets there by exiting just 19/174 trades — i.e. by doing almost
 nothing and converging to "hold." There is no setting where the model's exit
 signal adds dollars over holding to settlement.
 
-## Why, and the BS cautionary note
+## Isolated near-strike test (the decisive one)
 
-- **The validated near-strike edge is never exercised:** 0/174 exits at D ≤ 0.5
-  (that regime is reached in only 29/174 trades, 17%, usually too late). The
-  policy fires far from the strike (D > 0.5) where the model has no validated
-  edge.
+The headline policy is dominated by far-OTM exits (D>0.5, no edge), so it never
+isolates the model's *validated* near-strike edge. So we ran exactly that: hold
+every trade until price enters the D≤0.5 zone, then let the model cut (exit iff
+D≤0.5 and p_model<p_mkt), on the 29 held-out trades that reach the zone, marked
+on real chains.
+
+| on the 29 near-strike trades | P&L |
+|---|---|
+| trader's actual rules | **−$38,025** |
+| always-hold | −$123,397 |
+| near-strike model policy | **−$134,048** |
+
+The near-strike policy **loses to holding** (−$10,650) and is far worse than the
+trader's own rules. Its cuts are mostly wrong: **of 7 cuts, 5 cut false
+breakouts (winners), only 2 caught real breakouts.** A better Brier score near
+the strike is *not* the ability to discriminate which trades to cut: the edge is
+a hold-bias that holding already captures, and the trader's rules manage the
+genuine danger far better than the model.
+
+## The BS cautionary note
 - **BS-on-VIX1D was unusable:** on the same trades it marked the policy at
   +$229,100 vs the real-chain +$31,763 — a **+$197,338 overstatement**. A flat
   VIX1D vol (no skew, wrong level near the money) makes early closes look nearly
@@ -60,8 +76,10 @@ signal adds dollars over holding to settlement.
 **KILL — documented negative; no viable model-driven exit policy.** On real
 recorded quotes the policy is the worst of the three strategies (+$32k vs
 always-hold +$117k vs actual +$83k); no threshold beats simply holding to
-settlement; and the model never reaches the near-strike regime where its edge
-lives. Holding everything dominates both the model and the trader's current
-rules — which owes nothing to the model (re-confirms task 1.6). Third
+settlement. And when the validated near-strike edge is given its best shot —
+isolated to the D≤0.5 zone — it still loses to holding and is far worse than the
+trader's own rules, cutting winners 5 times out of 7. A better-calibrated
+survival probability near the strike does not translate into profitable exit
+discrimination; it is a hold-bias that holding already captures. Third
 independent test (Gate-4 band, veto overlay, exit policy) to converge on the
 same answer.
