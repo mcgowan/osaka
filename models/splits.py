@@ -49,6 +49,15 @@ EMBARGO_WEEKS = 1          # >= max feature lookback (rv5d = 5 trading days)
 CALIB_WEEKS_FRAC = 0.15    # of pre-test weeks
 VALID_WEEKS_FRAC = 0.15
 
+# The embargo must cover the longest feature lookback so a later region's
+# features never read an earlier region's bars. rv5d_ratio (5 trading days)
+# is the longest in the v1 spec; 1 ISO week = 5 trading days covers it
+# EXACTLY. If a feature with a longer lookback is ever added, raise
+# EMBARGO_WEEKS or this guard fails loudly (leakage-redteam style finding,
+# 2026-06-13: make the coupling programmatic, not just a comment).
+TRADING_DAYS_PER_WEEK = 5
+MAX_FEATURE_LOOKBACK_DAYS = 5
+
 
 def _week_id(day):
     """ISO (year, week) for a 'YYYY-MM-DD' string. Sorts chronologically
@@ -106,6 +115,12 @@ def make_split(days, calib_frac=CALIB_WEEKS_FRAC, valid_frac=VALID_WEEKS_FRAC,
 
     `days` must be pre-TEST_START already (we assert it). Fractions are of
     the *week* count, taken from the most recent end (VALID newest)."""
+    if embargo_weeks * TRADING_DAYS_PER_WEEK < MAX_FEATURE_LOOKBACK_DAYS:
+        raise ValueError(
+            f"embargo ({embargo_weeks}w = {embargo_weeks * TRADING_DAYS_PER_WEEK}"
+            f" trading days) < longest feature lookback "
+            f"({MAX_FEATURE_LOOKBACK_DAYS}d) - raise EMBARGO_WEEKS or a later "
+            f"region's features will read an earlier region's bars (rule #2)")
     days = sorted(days)
     if days and days[-1] >= TEST_START:
         raise ValueError(

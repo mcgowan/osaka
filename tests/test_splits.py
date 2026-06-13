@@ -106,6 +106,13 @@ def test_walk_forward_embargo_between_fit_and_val(days):
         assert not (val_weeks & fit_weeks)
 
 
+def test_embargo_must_cover_max_lookback(days):
+    # embargo_weeks=0 (or any width < the longest feature lookback) must raise,
+    # not silently let a later region's features read an earlier region's bars
+    with pytest.raises(ValueError, match="lookback"):
+        make_split(days, embargo_weeks=0)
+
+
 def test_assign_weeks_orders_across_year_boundary():
     # ISO week wrap: late-Dec 2024 and early-Jan 2025 must order correctly
     days = ["2024-12-30", "2024-12-31", "2025-01-02", "2025-01-03"]
