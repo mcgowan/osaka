@@ -61,6 +61,22 @@ def test_training_is_deterministic(small):
     assert np.array_equal(p1, p2)              # bit-identical, not just close
 
 
+def test_monotone_sweep_non_decreasing(small):
+    # FR-6.4: prediction must be non-decreasing as D rises, others fixed.
+    df, _, _ = small
+    booster, feats = gbt.train(df, num_rounds=60)
+    d_idx = feats.index("D")
+    grid_d = np.arange(0.2, 5.01, 0.2)
+    viol = 0
+    for row in df[feats].to_numpy(float)[:50]:
+        g = np.tile(row, (len(grid_d), 1))
+        g[:, d_idx] = grid_d
+        p = booster.predict(g)
+        if np.any(np.diff(p) < -1e-9):
+            viol += 1
+    assert viol == 0
+
+
 def test_early_stopping_rejects_overlapping_valid(small):
     df, _, _ = small
     # passing an overlapping frame as the early-stopping set must trip the guard

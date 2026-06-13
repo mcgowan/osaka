@@ -80,9 +80,12 @@ def _dataset(df, features, reference=None):
 
 
 def train(train_df, params=None, num_rounds=DEFAULT_NUM_ROUNDS,
-          include_pmkt=True, valid_df=None, early_stopping=None):
+          include_pmkt=True, valid_df=None, early_stopping=None,
+          features=None):
     """Train one booster on train_df. If valid_df + early_stopping given,
-    stops on validation logloss. Returns (booster, features).
+    stops on validation logloss. `features` overrides the default list (for
+    4.6 ablations - D must remain present so the monotone constraint binds).
+    Returns (booster, features).
 
     FOOTGUN GUARD (review item 1): if valid_df is supplied for early stopping
     it MUST be a within-TRAIN walk-forward fold's val block - never CALIB or
@@ -90,7 +93,10 @@ def train(train_df, params=None, num_rounds=DEFAULT_NUM_ROUNDS,
     We assert valid_df shares no day with train_df, which catches the obvious
     accident of passing an overlapping / held-out frame."""
     import lightgbm as lgb
-    features = feature_list(include_pmkt)
+    if features is None:
+        features = feature_list(include_pmkt)
+    if "D" not in features:
+        raise ValueError("D must be in the feature list (monotone constraint)")
     p = dict(DEFAULT_PARAMS)
     if params:
         p.update(params)
