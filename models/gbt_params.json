@@ -6,8 +6,8 @@
       "learning_rate": 0.03
     },
     "num_rounds": 400,
-    "cv_band_brier": 0.17737,
-    "cv_band_skill": -0.00105
+    "cv_band_brier": 0.17845,
+    "cv_band_skill": -0.00213
   },
   "without_pmkt": {
     "params": {
@@ -16,8 +16,8 @@
       "learning_rate": 0.03
     },
     "num_rounds": 400,
-    "cv_band_brier": 0.17738,
-    "cv_band_skill": -0.00106
+    "cv_band_brier": 0.17788,
+    "cv_band_skill": -0.00156
   },
   "_meta": {
     "selection": "pooled out-of-fold band-of-record Brier, walk-forward folds within TRAIN only (NFR-2.3)",

@@ -37,17 +37,23 @@ SEED = 0
 TARGET = "survive"
 CATEGORICAL = ("day_of_week",)
 
-# Pruned from the 29-feature spec library after the 4.6 ablation + gain review
-# (2026-06-13): dead weight (gain < ~0.15%) and the prior-day LEVELS, which the
-# no_pd_levels ablation showed are not load-bearing (near-strike skill
-# unchanged). The MASTER retains all 29 (it is the harness/redteam-validated
-# feature LIBRARY); the MODEL trains on this validated subset, and
-# gbt_params.json is tuned on it - so the Phase-5 model is exactly what 4.6/4.8
-# validated, with no divergence.
-PRUNED = ("dist_pdh", "dist_pdl", "persist_count", "is_opex_quarterly",
-          "is_half_day", "is_cpi_nfp", "is_opex", "gap_filled")
-MODEL_FEATURES = tuple(f for f in FEATURES if f not in PRUNED)        # 21
-MODEL_FEATURES_NO_PMKT = tuple(f for f in MODEL_FEATURES if f != "pmkt")  # 20
+# without-pmkt first-class variant (trader condition #25)
+FEATURES_NO_PMKT = tuple(f for f in FEATURES if f != "pmkt")
+
+# v2 PRUNE CANDIDATE - NOT applied in v1. The 4.6 ablation + gain review
+# (2026-06-13) flagged these 8 as droppable (dead weight by gain, plus the
+# prior-day LEVELS): dist_pdh, dist_pdl, persist_count, is_opex_quarterly,
+# is_half_day, is_cpi_nfp, is_opex, gap_filled. NOT pruned for v1 because:
+# (a) 29 is already within the 20-30 budget; (b) the prune's only claimed
+# benefit is "no edge change"; (c) shipping the 21-set would break the
+# validated==shipped guarantee - all the Gate-4 held-out evidence
+# (docs/modeling.md: CALIB/VALID near-strike, the regime decomposition,
+# calibration) is the 29-feature model, and the VALID-spent rule forbids
+# re-reading VALID to re-validate the 21-set. Revisit in v2 with its own
+# held-out budget. (dist_pdh at 1.62% gain is not clearly dead anyway.)
+PRUNE_V2_CANDIDATE = ("dist_pdh", "dist_pdl", "persist_count",
+                      "is_opex_quarterly", "is_half_day", "is_cpi_nfp",
+                      "is_opex", "gap_filled")
 
 DEFAULT_PARAMS = {
     "objective": "binary",
@@ -74,7 +80,7 @@ DEFAULT_NUM_ROUNDS = 400
 
 
 def feature_list(include_pmkt=True):
-    return list(MODEL_FEATURES if include_pmkt else MODEL_FEATURES_NO_PMKT)
+    return list(FEATURES if include_pmkt else FEATURES_NO_PMKT)
 
 
 def monotone_constraints(features):

@@ -70,19 +70,20 @@ On TRAIN OOF, same frozen params (isolates the effect, not a re-tune):
   `is_half_day`/`is_cpi_nfp` 0.03, `is_opex` 0.06, `gap_filled` 0.11, plus
   `dist_pdl` 0.33. Pruning these → ~22 features, no edge change.
 
-**Pruning applied — the final validated model is 21 features.** Dropped 8:
-`dist_pdh, dist_pdl, persist_count, is_opex_quarterly, is_half_day,
-is_cpi_nfp, is_opex, gap_filled` (`gbt.MODEL_FEATURES`). Confirmed no edge
-change on OOF (full-29 vs pruned-21: band −0.0021→−0.0011, near-strike
-+0.0020→+0.0018 P=0.955). Re-tuned on the pruned set (`gbt_params.json`): same
-config `num_leaves=15, min_data=1000, lr=0.03, 400 rounds`, CV band skill
-−0.0011; monotonicity re-verified (0 violations). **Artifact discipline:** the
-MASTER keeps all 29 features (the harness/redteam-validated feature LIBRARY);
-the MODEL trains on the 21-feature subset and `gbt_params.json` is tuned on it,
-so the Phase-5 model is exactly what 4.6/4.8 validated — no validated-vs-shipped
-divergence. (Subset chosen over a master rebuild to avoid re-running the
-lookahead harness / leakage review on a new master; the 8 dropped columns are
-inert.)
+**Pruning evaluated, DEFERRED to v2 — the v1 model is the full 29 features.**
+The 8 candidates (`dist_pdh, dist_pdl, persist_count, is_opex_quarterly,
+is_half_day, is_cpi_nfp, is_opex, gap_filled`; `gbt.PRUNE_V2_CANDIDATE`)
+showed no edge change in an OOF spot-check (full-29 vs candidate-21: band
+−0.0021→−0.0011, near-strike +0.0020→+0.0018), but the prune is NOT applied in
+v1. Reasons: 29 is already within the 20–30 budget; the prune's only claimed
+benefit is "no edge change"; and shipping a 21-feature model would break the
+validated==shipped guarantee — **all the Gate-4 held-out evidence below
+(CALIB/VALID, the regime decomposition, calibration) is the 29-feature
+model**, and the VALID-is-spent rule forbids re-reading VALID to give the
+21-set a clean held-out number. The 21-set was never run as a unit through the
+ablation table or CALIB/VALID, and `dist_pdh` (1.62% gain) is not clearly dead
+weight. So v1 ships the validated 29-feature model; the prune is logged as a v2
+candidate to be re-validated with its own held-out budget.
 
 ## Residual analysis (4.8) — where the edge lives, signal vs noise
 
