@@ -106,11 +106,40 @@ def test_walk_forward_embargo_between_fit_and_val(days):
         assert not (val_weeks & fit_weeks)
 
 
-def test_embargo_must_cover_max_lookback(days):
-    # embargo_weeks=0 (or any width < the longest feature lookback) must raise,
-    # not silently let a later region's features read an earlier region's bars
-    with pytest.raises(ValueError, match="lookback"):
-        make_split(days, embargo_weeks=0)
+def test_embargo_gap_holiday_proof_real_calendar():
+    # The bdate_range fixture has no holidays, so it can't expose a holiday
+    # shrinking an embargo week. Use the REAL trading calendar and assert the
+    # trading-day gap between regions is >= the longest feature lookback (5),
+    # i.e. a 5-day-lookback feature on a later region's first day never reads
+    # an earlier region's bar.
+    from data.features import load_master
+    real = sorted(load_master()["day"].unique())
+    sp = make_split(real)
+    pos = {d: i for i, d in enumerate(real)}
+
+    def gap(prev, nxt):
+        return pos[min(nxt)] - pos[max(prev)] - 1
+
+    assert gap(sp.train_days, sp.calib_days) >= 5
+    assert gap(sp.calib_days, sp.valid_days) >= 5
+    for fit, val in walk_forward_folds(sorted(sp.train_days)):
+        assert gap(fit, val) >= 5
+
+
+def test_carve_embargo_widens_on_short_holiday_week():
+    # A 4-day (holiday) week as the nominal 1-week embargo leaves only a 4-day
+    # gap; _carve_embargo must pull in a second week so the real trading-day
+    # gap clears min_gap_days=5.
+    from models.splits import _by_week, _carve_embargo
+    bd = [d.strftime("%Y-%m-%d")
+          for d in pd.bdate_range("2024-01-01", "2024-06-30")]
+    weeks, bw = _by_week(bd)
+    hi = 15
+    short = weeks[hi - 1]
+    bw[short] = bw[short][:4]            # simulate a holiday: 4-day week
+    lo = _carve_embargo(weeks, bw, hi, embargo_weeks=1, min_gap_days=5)
+    assert hi - lo >= 2                  # widened beyond the nominal 1 week
+    assert sum(len(bw[w]) for w in weeks[lo:hi]) >= 5
 
 
 def test_assign_weeks_orders_across_year_boundary():

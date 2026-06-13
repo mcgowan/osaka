@@ -179,7 +179,7 @@ def breakout_retest(df):
 SLICES = {
     "early_session": early_session,
     "near_strike": near_strike,
-    "breakout_retest": breakout_retest,   # PROVISIONAL
+    "breakout_retest": breakout_retest,   # OR false-breakout (trader, finalized)
 }
 
 

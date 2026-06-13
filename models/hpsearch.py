@@ -52,10 +52,16 @@ GRID = [
 ]
 
 
-def _split_params(cfg):
-    cfg = dict(cfg)
-    num_rounds = cfg.pop("num_rounds")
-    return cfg, num_rounds
+# the LightGBM-bound keys in a GRID entry (everything else in a result row -
+# band_brier, band_skill, ... - is a METRIC and must NOT leak into params)
+GRID_PARAM_KEYS = ("num_leaves", "min_data_in_leaf", "learning_rate")
+
+
+def _split_params(row):
+    """Extract ONLY the LightGBM params + num_rounds from a grid entry or a
+    result row (result rows also carry metric columns, which must not be
+    passed to the booster)."""
+    return {k: row[k] for k in GRID_PARAM_KEYS}, row["num_rounds"]
 
 
 def search_variant(master, folds, include_pmkt):

@@ -108,56 +108,100 @@ class Split:
                 f"emb_weeks={m['embargo_weeks']})")
 
 
+def _by_week(days):
+    """day-list -> (ordered weeks, {week: sorted day list})."""
+    day_to_week, weeks = assign_weeks(days)
+    bw = {}
+    for d, w in day_to_week.items():
+        bw.setdefault(w, []).append(d)
+    for w in bw:
+        bw[w].sort()
+    return weeks, bw
+
+
+def _carve_embargo(weeks, bw, hi, embargo_weeks, min_gap_days):
+    """Return lo such that weeks[lo:hi] is the embargo region holding AT LEAST
+    `embargo_weeks` weeks AND `min_gap_days` real TRADING days. Widening past
+    embargo_weeks is what makes the gap holiday-proof: a holiday week has only
+    4 trading days, so one week (the nominal embargo) leaves a 4-day gap and a
+    5-day-lookback feature on the next region's first day would bleed one day
+    across the boundary - so we pull in another week until the trading-day
+    count actually clears min_gap_days."""
+    lo = hi
+    while lo > 0:
+        lo -= 1
+        n_weeks = hi - lo
+        n_days = sum(len(bw[w]) for w in weeks[lo:hi])
+        if n_weeks >= embargo_weeks and n_days >= min_gap_days:
+            return lo
+    return lo  # ran out of weeks; caller validates sufficiency
+
+
+def _assert_no_leak(prev_days, next_days, all_pos, min_gap, label):
+    """Defense-in-depth: the first day of `next_days` must sit at least
+    min_gap TRADING days after the last day of `prev_days`, so a feature with
+    up to min_gap-day lookback on that first day never reads a prev-region
+    bar. Checks real positions in the full ordered day list, so holidays
+    can't fake the gap."""
+    if not prev_days or not next_days:
+        return
+    gap = all_pos[next_days[0]] - all_pos[prev_days[-1]] - 1
+    if gap < min_gap:
+        raise AssertionError(
+            f"{label}: only {gap} trading days between {prev_days[-1]} and "
+            f"{next_days[0]} (need >= {min_gap}); embargo failed to widen")
+
+
 def make_split(days, calib_frac=CALIB_WEEKS_FRAC, valid_frac=VALID_WEEKS_FRAC,
-               embargo_weeks=EMBARGO_WEEKS):
+               embargo_weeks=EMBARGO_WEEKS,
+               min_gap_days=MAX_FEATURE_LOOKBACK_DAYS):
     """Partition pre-test trading `days` chronologically by week into
     TRAIN / (embargo) / CALIB / (embargo) / VALID.
 
-    `days` must be pre-TEST_START already (we assert it). Fractions are of
-    the *week* count, taken from the most recent end (VALID newest)."""
-    if embargo_weeks * TRADING_DAYS_PER_WEEK < MAX_FEATURE_LOOKBACK_DAYS:
-        raise ValueError(
-            f"embargo ({embargo_weeks}w = {embargo_weeks * TRADING_DAYS_PER_WEEK}"
-            f" trading days) < longest feature lookback "
-            f"({MAX_FEATURE_LOOKBACK_DAYS}d) - raise EMBARGO_WEEKS or a later "
-            f"region's features will read an earlier region's bars (rule #2)")
+    `days` must be pre-TEST_START already (we assert it). Fractions are of the
+    *week* count, taken from the most recent end (VALID newest). The embargo
+    between regions holds at least `embargo_weeks` weeks AND `min_gap_days`
+    real trading days - the latter is the no-leak guarantee (it widens past
+    one week when a holiday shrinks the gap), asserted on real day positions
+    at the end."""
     days = sorted(days)
     if days and days[-1] >= TEST_START:
         raise ValueError(
             f"make_split received locked-period day(s) (>= {TEST_START}); "
             f"pass pre-test days only (rule #3)")
-    day_to_week, weeks = assign_weeks(days)
+    weeks, bw = _by_week(days)
     n = len(weeks)
     n_valid = max(1, round(n * valid_frac))
     n_calib = max(1, round(n * calib_frac))
-    if n_valid + n_calib + 2 * embargo_weeks >= n:
+
+    valid_lo = n - n_valid
+    emb1_lo = _carve_embargo(weeks, bw, valid_lo, embargo_weeks, min_gap_days)
+    calib_hi = emb1_lo
+    calib_lo = calib_hi - n_calib
+    if calib_lo <= 0:
+        raise ValueError("not enough weeks for the requested split")
+    emb2_lo = _carve_embargo(weeks, bw, calib_lo, embargo_weeks, min_gap_days)
+    train_hi = emb2_lo
+    if train_hi < 1:
         raise ValueError("not enough weeks for the requested split")
 
-    # carve from the newest end backward: VALID, embargo, CALIB, embargo, TRAIN
-    valid_w = set(weeks[n - n_valid:])
-    emb1_w = set(weeks[n - n_valid - embargo_weeks: n - n_valid])
-    calib_end = n - n_valid - embargo_weeks
-    calib_w = set(weeks[calib_end - n_calib: calib_end])
-    emb2_w = set(weeks[calib_end - n_calib - embargo_weeks: calib_end - n_calib])
-    train_w = set(weeks[: calib_end - n_calib - embargo_weeks])
+    def days_of(lo, hi):
+        return sorted(d for w in weeks[lo:hi] for d in bw[w])
 
-    by_week = {}
-    for d, w in day_to_week.items():
-        by_week.setdefault(w, []).append(d)
+    train_days = days_of(0, train_hi)
+    calib_days = days_of(calib_lo, calib_hi)
+    valid_days = days_of(valid_lo, n)
+    embargo_days = days_of(emb2_lo, calib_lo) + days_of(emb1_lo, valid_lo)
+    embargo_days.sort()
 
-    def days_of(ws):
-        out = []
-        for w in ws:
-            out += by_week.get(w, [])
-        return sorted(out)
-
-    train_days = days_of(train_w)
-    calib_days = days_of(calib_w)
-    valid_days = days_of(valid_w)
-    embargo_days = days_of(emb1_w | emb2_w)
+    # programmatic no-leak check on REAL day positions (holiday-proof)
+    pos = {d: i for i, d in enumerate(days)}
+    _assert_no_leak(train_days, calib_days, pos, min_gap_days, "train->calib")
+    _assert_no_leak(calib_days, valid_days, pos, min_gap_days, "calib->valid")
 
     meta = {
         "embargo_weeks": embargo_weeks,
+        "min_gap_days": min_gap_days,
         "n_weeks": n,
         "train_span": (train_days[0], train_days[-1]),
         "calib_span": (calib_days[0], calib_days[-1]),
@@ -167,41 +211,57 @@ def make_split(days, calib_frac=CALIB_WEEKS_FRAC, valid_frac=VALID_WEEKS_FRAC,
     return Split(train_days, calib_days, valid_days, embargo_days, meta)
 
 
+def gate4_valid_days(split, _gate4_reason=None):
+    """The ONE-SHOT VALID accessor. VALID is the Gate-4 region: it must be
+    read exactly once, on the frozen model, at Gate 4 - never during
+    iterative development (every dev read is invisible selection pressure, the
+    same risk class as the locked test set). All pre-Gate-4 evaluation goes
+    through TRAIN walk-forward OOF (models.oof.walk_forward_oof) instead.
+
+    This raises unless an explicit `_gate4_reason` is given, so VALID cannot be
+    pulled into a main() or a quick experiment by accident. The kwarg is named
+    to be greppable, mirroring data.loader._unlocked_full_span."""
+    if not _gate4_reason:
+        raise RuntimeError(
+            "VALID is one-shot (Gate-4 only). Use TRAIN walk-forward OOF "
+            "(models.oof.walk_forward_oof) for all development evaluation. To "
+            "read VALID deliberately at the gate, pass _gate4_reason='...'.")
+    return sorted(split.valid_days)
+
+
 def walk_forward_folds(train_days, n_folds=5, val_weeks=8,
-                       embargo_weeks=EMBARGO_WEEKS):
+                       embargo_weeks=EMBARGO_WEEKS,
+                       min_gap_days=MAX_FEATURE_LOOKBACK_DAYS):
     """Expanding-window walk-forward CV folds *within TRAIN* for
     hyperparameter search (4.4) and ablation selection (4.6).
 
     Fold k: fit on the oldest weeks, embargo gap, then a val_weeks block.
     The fit window grows with k (expanding, never peeks past its val block).
-    Returns a list of (fit_days, val_days) tuples, oldest fold first.
+    The fit->val embargo holds >= embargo_weeks weeks AND >= min_gap_days real
+    trading days (same holiday-proof widening as make_split). Returns a list
+    of (fit_days, val_days) tuples, oldest fold first.
 
-    Yields exactly the folds that fit; raises if TRAIN is too short for even
-    one fold at the requested sizes (caller should shrink the grid, not the
+    Raises if TRAIN is too short for even one fold (shrink the grid, not the
     discipline)."""
     train_days = sorted(train_days)
-    day_to_week, weeks = assign_weeks(train_days)
-    by_week = {}
-    for d, w in day_to_week.items():
-        by_week.setdefault(w, []).append(d)
+    weeks, bw = _by_week(train_days)
     n = len(weeks)
+    pos = {d: i for i, d in enumerate(train_days)}
 
-    # last val block ends at the newest train week; earlier folds step back
-    # by val_weeks each. Need a fit window of >= 1 week before each.
     span_per_fold = val_weeks
-    min_fit_weeks = 1
-    earliest_val_start = min_fit_weeks + embargo_weeks
     folds = []
     for k in range(n_folds):
         val_end = n - k * span_per_fold          # exclusive
         val_start = val_end - val_weeks
-        fit_end = val_start - embargo_weeks       # exclusive
-        if val_start < earliest_val_start or fit_end < min_fit_weeks:
+        if val_start < 1:
             break
-        fit_w = weeks[:fit_end]
-        val_w = weeks[val_start:val_end]
-        fit_days = sorted(d for w in fit_w for d in by_week[w])
-        val_days = sorted(d for w in val_w for d in by_week[w])
+        fit_end = _carve_embargo(weeks, bw, val_start, embargo_weeks,
+                                 min_gap_days)   # exclusive week index
+        if fit_end < 1:
+            break
+        fit_days = sorted(d for w in weeks[:fit_end] for d in bw[w])
+        val_days = sorted(d for w in weeks[val_start:val_end] for d in bw[w])
+        _assert_no_leak(fit_days, val_days, pos, min_gap_days, f"fold{k}")
         folds.append((fit_days, val_days))
     if not folds:
         raise ValueError(

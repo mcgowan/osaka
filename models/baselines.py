@@ -55,28 +55,44 @@ def fit_logit5(train, features=LOGIT5_FEATURES):
     return pipe
 
 
-def predict_all(split, master):
-    """Attach base_rate / logit5 prediction columns to the VALID frame and
-    return it (pmkt is already a column). Fits everything on TRAIN."""
-    train = master[master["day"].isin(split.train_days)].copy()
-    valid = master[master["day"].isin(split.valid_days)].copy()
-
-    base = float(train["survive"].mean())
-    valid["base_rate"] = base
-
+def _logit_predict(model, df):
     import warnings
-    logit = fit_logit5(train)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
-        valid["logit5"] = logit.predict_proba(
-            valid[list(LOGIT5_FEATURES)].values)[:, 1]
-    return valid, {"train_base_rate": round(base, 4)}
+        return model.predict_proba(df[list(LOGIT5_FEATURES)].values)[:, 1]
 
 
-def report(valid, pred_cols=("base_rate", "pmkt", "logit5")):
+def predict_all_oof(split, master):
+    """Development evaluation: base_rate + logit5 as TRAIN walk-forward OOF
+    predictions (pmkt is already a per-row column). One pass over the folds so
+    all three live on the same rows. Never touches VALID (review item 1)."""
+    from models.splits import walk_forward_folds
+    parts = []
+    for fit_days, val_days in walk_forward_folds(sorted(split.train_days)):
+        fit = master[master["day"].isin(fit_days)]
+        val = master[master["day"].isin(val_days)].copy()
+        val["base_rate"] = float(fit["survive"].mean())
+        val["logit5"] = _logit_predict(fit_logit5(fit), val)
+        parts.append(val)
+    return pd.concat(parts, ignore_index=True)
+
+
+def predict_all_gate4(split, master, _gate4_reason=None):
+    """GATE-4 ONLY: the baselines on the frozen VALID region (the one-shot
+    Gate-4 comparison). Reads VALID through the one-shot gate."""
+    from models.splits import gate4_valid_days
+    valid = master[master["day"].isin(
+        gate4_valid_days(split, _gate4_reason=_gate4_reason))].copy()
+    train = master[master["day"].isin(split.train_days)]
+    valid["base_rate"] = float(train["survive"].mean())
+    valid["logit5"] = _logit_predict(fit_logit5(train), valid)
+    return valid
+
+
+def report(valid, pred_cols=("base_rate", "pmkt", "logit5"), where="OOF"):
     print("\n" + "=" * 72)
-    print("BASELINES on VALID  (n_days=%d, n_rows=%d, base_rate=%.4f)"
-          % (valid["day"].nunique(), len(valid), valid["survive"].mean()))
+    print("BASELINES on %s  (n_days=%d, n_rows=%d, base_rate=%.4f)"
+          % (where, valid["day"].nunique(), len(valid), valid["survive"].mean()))
     print("=" * 72)
     for col in pred_cols:
         print(f"\n--- [{col}] per distance bucket "
@@ -104,10 +120,10 @@ def main():
     master = load_master()
     days = sorted(master["day"].unique())
     split = make_split(days)
-    print(split)
-    valid, info = predict_all(split, master)
-    print(info)
-    report(valid)
+    print(f"{split}\n(evaluation = TRAIN walk-forward OOF; VALID reserved for "
+          f"Gate 4)")
+    oof = predict_all_oof(split, master)
+    report(oof, where="TRAIN-OOF")
 
 
 if __name__ == "__main__":
