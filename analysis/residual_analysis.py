@@ -51,13 +51,12 @@ def main():
     split = make_split(sorted(master["day"].unique()))
     c = json.load(open(PARAMS_PATH))["with_pmkt"]
 
+    feats = gbt.feature_list(True)
+
     def fp(fit, val):
         b, _ = gbt.train(fit, params=c["params"], num_rounds=c["num_rounds"],
                          include_pmkt=True)
-        return gbt.predict(b, val, feats_used(b))
-
-    def feats_used(_b):
-        return gbt.feature_list(True)
+        return gbt.predict(b, val, feats)
 
     oof = walk_forward_oof(master, split, fp, label="pred")
     oof["resid"] = oof["pred"] - oof["pmkt"]

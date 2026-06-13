@@ -9,9 +9,11 @@
                    richness already extracts, so the GBT's lift is measured
                    against something that already knows distance + vol + T.
 
-All three are FIT on TRAIN only and reported on VALID (Gate-4 region), via
-the shared eval harness, per distance bucket + NFR-2.1b slice. Deterministic
-(fixed seed, no row-level anything; split is week-based per models.splits).
+All three are FIT on TRAIN only. The default path (`main`) reports on TRAIN
+walk-forward OOF (`predict_all_oof`) - VALID is one-shot (review item 1);
+`predict_all_gate4` is the gated VALID comparison for Gate 4 itself. Reported
+via the shared eval harness, per distance bucket + NFR-2.1b slice.
+Deterministic (fixed seed, no row-level anything; split week-based).
 
 Run:  .venv/bin/python models/baselines.py
 """
@@ -47,10 +49,11 @@ def fit_logit5(train, features=LOGIT5_FEATURES):
         ("scale", StandardScaler()),
         ("lr", LogisticRegression(max_iter=1000, C=1.0, random_state=SEED)),
     ])
-    # benign BLAS overflow warnings during LBFGS line search on this platform;
-    # predictions verified finite (no inf/nan in the 5 inputs)
+    # benign macOS-Accelerate overflow during the LBFGS line search; narrow
+    # the suppression to that message so a different RuntimeWarning still shows
     with warnings.catch_warnings():
-        warnings.simplefilter("ignore", RuntimeWarning)
+        warnings.filterwarnings("ignore", category=RuntimeWarning,
+                                message=".*overflow.*")
         pipe.fit(train[list(features)].values, train["survive"].values)
     return pipe
 
@@ -58,8 +61,14 @@ def fit_logit5(train, features=LOGIT5_FEATURES):
 def _logit_predict(model, df):
     import warnings
     with warnings.catch_warnings():
-        warnings.simplefilter("ignore", RuntimeWarning)
-        return model.predict_proba(df[list(LOGIT5_FEATURES)].values)[:, 1]
+        # the only RuntimeWarning here is the benign macOS-Accelerate matmul
+        # overflow during LBFGS-fitted predict; suppress it but assert the
+        # output is actually finite so a real future issue can't hide.
+        warnings.filterwarnings("ignore", category=RuntimeWarning,
+                                message=".*overflow.*")
+        p = model.predict_proba(df[list(LOGIT5_FEATURES)].values)[:, 1]
+    assert np.all(np.isfinite(p)), "logit5 produced non-finite probabilities"
+    return p
 
 
 def predict_all_oof(split, master):

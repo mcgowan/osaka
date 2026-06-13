@@ -70,6 +70,20 @@ On TRAIN OOF, same frozen params (isolates the effect, not a re-tune):
   `is_half_day`/`is_cpi_nfp` 0.03, `is_opex` 0.06, `gap_filled` 0.11, plus
   `dist_pdl` 0.33. Pruning these → ~22 features, no edge change.
 
+**Pruning applied — the final validated model is 21 features.** Dropped 8:
+`dist_pdh, dist_pdl, persist_count, is_opex_quarterly, is_half_day,
+is_cpi_nfp, is_opex, gap_filled` (`gbt.MODEL_FEATURES`). Confirmed no edge
+change on OOF (full-29 vs pruned-21: band −0.0021→−0.0011, near-strike
++0.0020→+0.0018 P=0.955). Re-tuned on the pruned set (`gbt_params.json`): same
+config `num_leaves=15, min_data=1000, lr=0.03, 400 rounds`, CV band skill
+−0.0011; monotonicity re-verified (0 violations). **Artifact discipline:** the
+MASTER keeps all 29 features (the harness/redteam-validated feature LIBRARY);
+the MODEL trains on the 21-feature subset and `gbt_params.json` is tuned on it,
+so the Phase-5 model is exactly what 4.6/4.8 validated — no validated-vs-shipped
+divergence. (Subset chosen over a master rebuild to avoid re-running the
+lookahead harness / leakage review on a new master; the 8 dropped columns are
+inert.)
+
 ## Residual analysis (4.8) — where the edge lives, signal vs noise
 
 `analysis/residual_analysis.py`, TRAIN OOF, tuned with-pmkt model. Mean
@@ -122,6 +136,16 @@ Isotonic fit on CALIB (`models/calibrate.py`) **worsens** every VALID bucket
 ≈ 7.4pt already exceeds the Section-8 ±3pt target. Calibration approach needs
 rethinking (e.g. calibrate on a window adjacent to deployment, or regime-
 conditional) before any go.
+
+**VALID-is-spent rule for calibration rework (binding).** Any rework of the
+calibration method (regime-conditional, deployment-adjacent window, Platt vs
+isotonic, etc.) MUST be selected without reading VALID — fit on CALIB and
+assess via CALIB-internal cross-validation or TRAIN OOF; VALID is read exactly
+once, at the Gate-4/Phase-5 verdict, never iterated against. The code enforces
+the seam (`build_calibrated`/`gate4_valid_days` require an explicit
+`_gate4_reason`), but the discipline is the operator's: choosing a calibrator
+by repeatedly checking VALID is selection on VALID and silently spends the
+one-shot. This is the single place the reviewer flagged as most likely to slip.
 
 ## Gate-4 readiness vs Section-8 criteria
 

@@ -37,16 +37,28 @@ SEED = 0
 TARGET = "survive"
 CATEGORICAL = ("day_of_week",)
 
-# without-pmkt first-class variant (trader condition #25)
-FEATURES_NO_PMKT = tuple(f for f in FEATURES if f != "pmkt")
+# Pruned from the 29-feature spec library after the 4.6 ablation + gain review
+# (2026-06-13): dead weight (gain < ~0.15%) and the prior-day LEVELS, which the
+# no_pd_levels ablation showed are not load-bearing (near-strike skill
+# unchanged). The MASTER retains all 29 (it is the harness/redteam-validated
+# feature LIBRARY); the MODEL trains on this validated subset, and
+# gbt_params.json is tuned on it - so the Phase-5 model is exactly what 4.6/4.8
+# validated, with no divergence.
+PRUNED = ("dist_pdh", "dist_pdl", "persist_count", "is_opex_quarterly",
+          "is_half_day", "is_cpi_nfp", "is_opex", "gap_filled")
+MODEL_FEATURES = tuple(f for f in FEATURES if f not in PRUNED)        # 21
+MODEL_FEATURES_NO_PMKT = tuple(f for f in MODEL_FEATURES if f != "pmkt")  # 20
 
 DEFAULT_PARAMS = {
     "objective": "binary",
     "metric": "binary_logloss",
     "boosting_type": "gbdt",
+    # these mirror the frozen choice in gbt_params.json (4.4); production code
+    # loads that file, so defaults only drive gbt.main()/smoke - kept in sync
+    # so a reader of main() sees the validated model.
     "learning_rate": 0.03,
-    "num_leaves": 31,
-    "min_data_in_leaf": 2000,    # large: effective N is days, not rows
+    "num_leaves": 15,
+    "min_data_in_leaf": 1000,    # large: effective N is days, not rows
     "feature_fraction": 0.8,
     "bagging_fraction": 0.8,
     "bagging_freq": 1,
@@ -58,11 +70,11 @@ DEFAULT_PARAMS = {
     "deterministic": True,
     "force_row_wise": True,
 }
-DEFAULT_NUM_ROUNDS = 600
+DEFAULT_NUM_ROUNDS = 400
 
 
 def feature_list(include_pmkt=True):
-    return list(FEATURES if include_pmkt else FEATURES_NO_PMKT)
+    return list(MODEL_FEATURES if include_pmkt else MODEL_FEATURES_NO_PMKT)
 
 
 def monotone_constraints(features):
