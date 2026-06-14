@@ -96,7 +96,7 @@ def test_date_bounds_inclusive():
 
 def test_unknown_dataset_rejected():
     with pytest.raises(ValueError):
-        load_bars("SPY")
+        load_bars("QQQ")        # not a configured symbol (SPY now is, for v2)
     with pytest.raises(ValueError):
         load_bars("SPX", freq="5min")
 

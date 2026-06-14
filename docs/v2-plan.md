@@ -103,7 +103,11 @@ pieces:
 - **Breakout state:** extension beyond OR (in ATR/range units), bars since
   break, attempt number, OR width vs ATR, time of day.
 - **Volume / participation (new, SPY):** relative volume vs same-time-of-day
-  baseline, breakout-bar volume, volume trend, VWAP relationship.
+  baseline, breakout-bar volume, volume trend, VWAP relationship. **(Phase-0 QA:
+  SPY per-minute volume has a strong secular trend — 2008 median ≫ 2024 — so
+  ALL volume features MUST use a trailing-relative baseline, never absolute or
+  full-history-normalized; investigate whether the trend is smooth vs a vendor
+  units step before Phase 2.)**
 - **Today's tape (v1 carryover):** range-so-far, efficiency ratio, persistence,
   open-drive, gap (`gap_atr`) — the "gapped up BIG → toppy" signal.
 - **Multi-day context (the trader's key requirement; mostly v1 carryover +

@@ -61,10 +61,19 @@ OUT_DIR = os.path.join(DATA_DIR, "processed")
 MANIFEST = os.path.join(OUT_DIR, "manifest.json")
 
 LOADER_VERSION = 1
-TEST_START = "2025-12-01"   # locked test boundary - see module docstring
-SYMBOLS = ("SPX", "VIX", "VIX1D")
+TEST_START = "2025-12-01"   # v1 locked test boundary - see module docstring
+SYMBOLS = ("SPX", "VIX", "VIX1D", "SPY")
 FREQS = ("1min", "1day")
 COLS = ["open", "high", "low", "close"]
+
+# v1's locked-test discipline (TEST_START truncation in load_bars) applies to
+# the v1 instruments only. SPY is the v2 (OR-breakout) instrument; v2 defines
+# and enforces its OWN locked-test boundary at the split layer (v2 Phase 1),
+# so SPY loads full-span here.
+V1_LOCKED_SYMBOLS = {"SPX", "VIX", "VIX1D"}
+# SPY (ETF) carries real TRADES volume - the reason v2 uses it over the
+# volumeless SPX index. Its raw CSV has a 6th column.
+VOLUME_SYMBOLS = {"SPY"}
 
 RTH_START, RTH_END = "09:30", "15:59"     # inclusive bar labels, ET
 HALF_DAY_RANGE = (209, 225)               # RTH bar count signature
@@ -75,7 +84,12 @@ KNOWN_CLOSED_JUNK = {
     "SPX": {"2004-04-09", "2004-05-31", "2004-12-24", "2006-04-14"},
     "VIX": set(),
     "VIX1D": set(),
+    "SPY": set(),
 }
+
+
+def _cols(symbol):
+    return COLS + (["volume"] if symbol in VOLUME_SYMBOLS else [])
 
 
 def _sha256(path):
@@ -88,7 +102,7 @@ def _sha256(path):
 
 def _read_raw(symbol, freq):
     path = os.path.join(IB_DIR, f"{symbol}-{freq}.csv")
-    df = pd.read_csv(path, header=None, names=["ts"] + COLS,
+    df = pd.read_csv(path, header=None, names=["ts"] + _cols(symbol),
                      parse_dates=["ts"])
     return df, path
 
@@ -115,14 +129,25 @@ def _clean_daily(df, symbol):
     return df.reset_index(drop=True)
 
 
-def build():
+def build(only=None):
+    """Build processed parquet + manifest from the raw IB CSVs.
+
+    only=<SYMBOL> rebuilds just that symbol and MERGES into the existing
+    manifest (preserving the other instruments' entries + hashes) - used to add
+    SPY for v2 without re-reading the multi-GB SPX CSV or invalidating v1's
+    pinned-hash artifacts. A full build (only=None) regenerates everything."""
     os.makedirs(OUT_DIR, exist_ok=True)
-    manifest = {
-        "loader_version": LOADER_VERSION,
-        "built_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-        "datasets": {},
-    }
-    for symbol in SYMBOLS:
+    if only and os.path.exists(MANIFEST):
+        manifest = load_manifest()
+        manifest["built_utc"] = datetime.now(timezone.utc).strftime(
+            "%Y-%m-%d %H:%M:%S")
+    else:
+        manifest = {
+            "loader_version": LOADER_VERSION,
+            "built_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            "datasets": {},
+        }
+    for symbol in ((only,) if only else SYMBOLS):
         for freq in FREQS:
             src = os.path.join(IB_DIR, f"{symbol}-{freq}.csv")
             if not os.path.exists(src):
@@ -147,7 +172,8 @@ def build():
             }
             print(f"{symbol}-{freq}: {raw_rows:,} raw -> {len(df):,} clean rows "
                   f"({df['ts'].iloc[0]:%Y-%m-%d} .. {df['ts'].iloc[-1]:%Y-%m-%d})")
-    _build_calendar(manifest)
+    if not only:                       # calendar is SPX-derived; keep on full build
+        _build_calendar(manifest)
     with open(MANIFEST, "w") as f:
         json.dump(manifest, f, indent=2)
     print(f"manifest -> {MANIFEST}")
@@ -258,11 +284,13 @@ def load_manifest():
 def load_bars(symbol, freq="1min", start=None, end=None,
               _unlocked_full_span=False):
     """Canonical bar access. Returns a DataFrame with columns
-    [ts, open, high, low, close], ts ascending, ET timestamps, RTH only.
-    start/end are inclusive 'YYYY-MM-DD' date bounds.
+    [ts, open, high, low, close(, volume for SPY)], ts ascending, ET
+    timestamps, RTH only. start/end are inclusive 'YYYY-MM-DD' date bounds.
 
-    Rows on/after TEST_START are EXCLUDED unless _unlocked_full_span=True
-    (sanctioned callers only - see module docstring; rule #3)."""
+    For v1 instruments (SPX/VIX/VIX1D) rows on/after TEST_START are EXCLUDED
+    unless _unlocked_full_span=True (sanctioned callers only - module docstring,
+    rule #3). SPY (v2) is NOT under the v1 lock; v2 enforces its own locked-test
+    boundary at the split layer."""
     if symbol not in SYMBOLS or freq not in FREQS:
         raise ValueError(f"unknown dataset {symbol}-{freq}")
     key = f"{symbol}-{freq}"
@@ -275,7 +303,7 @@ def load_bars(symbol, freq="1min", start=None, end=None,
             f"{key}.parquet does not match the manifest hash - "
             f"rebuild via 'loader.py build' (never edit parquet in place)")
     df = pd.read_parquet(path)
-    if not _unlocked_full_span:
+    if not _unlocked_full_span and symbol in V1_LOCKED_SYMBOLS:
         df = df[df["ts"] < pd.Timestamp(TEST_START)]
     if start is not None:
         df = df[df["ts"] >= pd.Timestamp(start)]
@@ -303,7 +331,8 @@ def trading_days(symbol, freq="1min"):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 2 and sys.argv[1] == "build":
-        build()
+    if len(sys.argv) >= 2 and sys.argv[1] == "build":
+        # `build` (full) or `build SYMBOL` (just that instrument, merge manifest)
+        build(only=sys.argv[2] if len(sys.argv) >= 3 else None)
     else:
         print(__doc__)
