@@ -154,21 +154,23 @@ def _assert_no_leak(prev_days, next_days, all_pos, min_gap, label):
 
 def make_split(days, calib_frac=CALIB_WEEKS_FRAC, valid_frac=VALID_WEEKS_FRAC,
                embargo_weeks=EMBARGO_WEEKS,
-               min_gap_days=MAX_FEATURE_LOOKBACK_DAYS):
+               min_gap_days=MAX_FEATURE_LOOKBACK_DAYS,
+               test_start=TEST_START):
     """Partition pre-test trading `days` chronologically by week into
     TRAIN / (embargo) / CALIB / (embargo) / VALID.
 
-    `days` must be pre-TEST_START already (we assert it). Fractions are of the
+    `days` must be pre-`test_start` already (we assert it). `test_start`
+    defaults to the v1 locked boundary; v2 passes its own (breakouts.V2_TEST_START)
+    so the same tested machinery serves both projects. Fractions are of the
     *week* count, taken from the most recent end (VALID newest). The embargo
     between regions holds at least `embargo_weeks` weeks AND `min_gap_days`
-    real trading days - the latter is the no-leak guarantee (it widens past
-    one week when a holiday shrinks the gap), asserted on real day positions
-    at the end."""
+    real trading days - the no-leak guarantee (it widens past one week when a
+    holiday shrinks the gap), asserted on real day positions at the end."""
     days = sorted(days)
-    if days and days[-1] >= TEST_START:
+    if days and days[-1] >= test_start:
         raise ValueError(
-            f"make_split received locked-period day(s) (>= {TEST_START}); "
-            f"pass pre-test days only (rule #3)")
+            f"make_split received locked-period day(s) (>= {test_start}); "
+            f"pass pre-test days only")
     weeks, bw = _by_week(days)
     n = len(weeks)
     n_valid = max(1, round(n * valid_frac))
@@ -206,7 +208,7 @@ def make_split(days, calib_frac=CALIB_WEEKS_FRAC, valid_frac=VALID_WEEKS_FRAC,
         "train_span": (train_days[0], train_days[-1]),
         "calib_span": (calib_days[0], calib_days[-1]),
         "valid_span": (valid_days[0], valid_days[-1]),
-        "test_start": TEST_START,
+        "test_start": test_start,
     }
     return Split(train_days, calib_days, valid_days, embargo_days, meta)
 
