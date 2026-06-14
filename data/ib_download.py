@@ -56,16 +56,19 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 try:
-    from ib_async import IB, Index  # community fork, Python >= 3.10
+    from ib_async import IB, Index, Stock  # community fork, Python >= 3.10
 except ImportError:
     try:
-        from ib_insync import IB, Index  # predecessor, works on Python 3.9
+        from ib_insync import IB, Index, Stock  # predecessor, works on Python 3.9
     except ImportError:
         sys.exit("run: .venv/bin/pip install ib_insync")
 
 ET = ZoneInfo("America/New_York")
 OUT_DIR = os.path.join(os.path.dirname(__file__), "ib")
-SYMBOLS = {"SPX": "CBOE", "VIX": "CBOE", "VIX1D": "CBOE"}
+# CBOE indices (no real volume) + SPY (ETF, has volume — the v2 reason it's here)
+INDEX_SYMBOLS = {"SPX": "CBOE", "VIX": "CBOE", "VIX1D": "CBOE"}
+STOCK_SYMBOLS = {"SPY": ("SMART", "USD", "ARCA")}  # (exchange, currency, primary)
+SYMBOLS = list(INDEX_SYMBOLS) + list(STOCK_SYMBOLS)
 CHUNK = "1 W"            # duration per 1-min request; drop to "1 D" if IB rejects
 SLEEP_S = 11             # ~55 requests / 10 min, under the 60-cap
 RTH_ONLY = True
@@ -82,7 +85,13 @@ KNOWN_IB_HOLES = {
         "2004-04-09",  # Good Friday (closed); IB has 1 junk bar
     },
     "VIX1D": set(),
+    "SPY": set(),
 }
+
+
+def has_volume(symbol):
+    """SPY (and any STOCK_SYMBOLS) carry real volume; CBOE indices do not."""
+    return symbol in STOCK_SYMBOLS
 
 # Deferred-stop SIGINT handler so Ctrl-C never truncates a chunk mid-write —
 # resume only refills timestamps earlier than the file's earliest, so a
@@ -110,7 +119,11 @@ def connect(port, client_id):
 
 
 def qualify(ib, symbol):
-    contract = Index(symbol, SYMBOLS[symbol])
+    if symbol in INDEX_SYMBOLS:
+        contract = Index(symbol, INDEX_SYMBOLS[symbol])
+    else:
+        exch, ccy, primary = STOCK_SYMBOLS[symbol]
+        contract = Stock(symbol, exch, ccy, primaryExchange=primary)
     ib.qualifyContracts(contract)
     return contract
 
@@ -145,18 +158,24 @@ def existing_earliest(path):
     return earliest
 
 
-def write_bars(path, bars):
+def write_bars(path, bars, with_volume=False):
     """Append a full chunk in a single unbuffered write so SIGINT (or any
     abrupt exit) cannot truncate mid-chunk. Combined with the deferred-stop
     handler this eliminates the partial-chunk-becomes-permanent-hole class
-    of failure that left 2011-05-27 with only 29 of its bars on disk."""
+    of failure that left 2011-05-27 with only 29 of its bars on disk.
+
+    Index symbols write [ts,o,h,l,c]; volume-bearing symbols (SPY) append a
+    6th `volume` column - the v2 reason SPY is downloaded at all."""
     if not bars:
         return
     buf = io.StringIO()
     w = csv.writer(buf)
     for b in bars:
         ts = b.date.astimezone(ET) if hasattr(b.date, "astimezone") else b.date
-        w.writerow([str(ts)[:19], b.open, b.high, b.low, b.close])
+        row = [str(ts)[:19], b.open, b.high, b.low, b.close]
+        if with_volume:
+            row.append(b.volume)
+        w.writerow(row)
     payload = buf.getvalue().encode()
     with open(path, "ab", buffering=0) as f:
         f.write(payload)
@@ -170,7 +189,7 @@ def download_daily(ib, symbol):
     path = out_path(symbol, daily=True)
     if os.path.exists(path):
         os.remove(path)
-    write_bars(path, bars)
+    write_bars(path, bars, with_volume=has_volume(symbol))
     print(f"{symbol}: {len(bars)} daily bars -> {path}")
 
 
@@ -212,7 +231,7 @@ def download_minute(ib, symbol, start):
             continue
         chunk_fails = 0
         if bars:
-            write_bars(path, bars)
+            write_bars(path, bars, with_volume=has_volume(symbol))
             first = bars[0].date
             first = first.astimezone(ET).replace(tzinfo=None) \
                 if hasattr(first, "astimezone") else datetime.combine(first, datetime.min.time())
@@ -272,7 +291,7 @@ def fill_gaps(ib, symbol):
             time.sleep(SLEEP_S)
             continue
         if bars:
-            write_bars(path, bars)
+            write_bars(path, bars, with_volume=has_volume(symbol))
             print(f"  {day}: fetched {len(bars)} bars")
         else:
             print(f"  {day}: no data returned")
