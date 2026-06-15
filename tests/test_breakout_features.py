@@ -9,11 +9,13 @@ import sys
 
 import numpy as np
 import pandas as pd
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from data.breakout_features import (breakout_state, volume_vwap, build,  # noqa: E402
-                                     FEATURES, _atr14_by_day,
-                                     _tod_volume_baseline)
+                                     FEATURES, _atr14_by_day, tape_features,
+                                     _tod_volume_baseline, _multiday_context,
+                                     _realized_vol_baseline)
 
 
 def _ev(side="up", or_high=100.0, or_low=90.0, start_close=101.0, attempt=1,
@@ -60,6 +62,61 @@ def test_volume_vwap_is_prefix_only():
             a, b = full[key], trunc[key]
             assert (np.isnan(a) and np.isnan(b)) or abs(a - b) < 1e-12, \
                 f"{key} not prefix-only at si={si}: {a} vs {b}"
+
+
+def test_tape_features_is_prefix_only():
+    o, h, l, c, v = _rng(120, seed=11)
+    for si in (16, 40, 90, 119):
+        full = tape_features(o, h, l, c, si, atr=2.0, close_y=99.5, rv_base=0.15)
+        k = si + 1
+        trunc = tape_features(o[:k], h[:k], l[:k], c[:k], si,
+                              atr=2.0, close_y=99.5, rv_base=0.15)
+        for key in full:
+            a, b = full[key], trunc[key]
+            assert (np.isnan(a) and np.isnan(b)) or abs(a - b) < 1e-12, \
+                f"{key} not prefix-only at si={si}"
+
+
+def _synth_daily(n, seed):
+    g = np.random.RandomState(seed)
+    close = 100 + np.cumsum(g.normal(0, 1, n))
+    return pd.DataFrame({"ts": pd.date_range("2020-01-01", periods=n, freq="D"),
+                         "open": close + g.normal(0, 0.3, n),
+                         "high": close + np.abs(g.normal(0, 0.5, n)),
+                         "low": close - np.abs(g.normal(0, 0.5, n)), "close": close})
+
+
+def test_multiday_context_is_prefix_only_day_level():
+    # the N-day high/low levels + ATR for day t must be future-blind
+    d = _synth_daily(40, seed=4)
+    vix = d[["ts"]].assign(close=15.0)
+    full = _multiday_context(d, vix, vix)
+    days = d["ts"].dt.strftime("%Y-%m-%d").tolist()
+    for cut in (25, 35):
+        tr = _multiday_context(d.iloc[:cut], vix.iloc[:cut], vix.iloc[:cut])
+        td = days[cut - 1]
+        for key in ("hi20", "lo20", "atr14", "close_y", "close_y3"):
+            a, b = full[td][key], tr[td][key]
+            assert (np.isnan(a) and np.isnan(b)) or abs(a - b) < 1e-9, \
+                f"multiday {key} lookahead at {td}"
+
+
+def test_realized_vol_baseline_is_prefix_only_day_level():
+    g = np.random.RandomState(8)
+    frames = []
+    for di, day in enumerate(pd.date_range("2020-01-01", periods=40, freq="D")):
+        c = 100 + np.cumsum(g.normal(0, 0.2, 30))
+        frames.append(pd.DataFrame({"day": day.strftime("%Y-%m-%d"), "close": c}))
+    spy = pd.concat(frames, ignore_index=True)
+    full = _realized_vol_baseline(spy)
+    days = sorted(spy["day"].unique())
+    for cut in (25, 35):
+        sub = spy[spy["day"].isin(days[:cut])]
+        tr = _realized_vol_baseline(sub)
+        td = days[cut - 1]
+        a, b = full[td], tr[td]
+        assert (np.isnan(a) and np.isnan(b)) or abs(a - b) < 1e-12, \
+            f"rv-baseline lookahead at {td}"
 
 
 def test_vwap_distance_sign():
@@ -112,3 +169,12 @@ def test_build_smoke_has_features_and_label():
     assert df["reversed"].isin([0, 1]).all()
     # rule #4: no raw level columns leaked into the table
     assert not ({"or_high", "or_low", "start_close"} & set(df.columns))
+
+
+def test_load_master_hash_verified_if_built():
+    from data.breakout_features import MASTER_MANIFEST, load_master
+    if not os.path.exists(MASTER_MANIFEST):
+        pytest.skip("master not built (run breakout_features.py build)")
+    df = load_master()                        # raises on hash mismatch
+    assert set(FEATURES) <= set(df.columns)
+    assert "reversed" in df.columns and len(df) > 0

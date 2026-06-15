@@ -1,9 +1,9 @@
 """v2 Phase 2 — feature library + event-bar table builder (OR-breakout conviction).
 
-WORK IN PROGRESS: blocks 1-2 (breakout-state, volume/VWAP) are implemented; the
-tape and multi-day/regime blocks, parquet persistence + load_master + a manifest
-entry, and the signed spec sheet (docs/v2-feature-spec.md) land at Phase-2 close.
-build() currently returns an in-memory DataFrame.
+Four feature blocks (26 features): breakout-state, volume/VWAP, today's tape,
+multi-day/regime - see docs/v2-feature-spec.md. build() assembles the DEV table;
+save_master/load_master persist it (hashed manifest). The signed spec sign-off
+and the leakage-redteam pass are the Phase-2 gate items.
 
 Each event is scored at its DECISION BAR = the close of the breakout bar (first
 1-min close outside the OR). Information set at the decision bar: completed bars
@@ -23,23 +23,35 @@ Hard exclusions (v2-plan §5): no eleuthera gate outputs (pressure/RSI/risk/5-ba
 count), no option pricing/greeks, no raw price levels, no lookahead.
 """
 
+import json
+import math
 import os
 import sys
+from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from data.breakouts import build_events, v2_split, _mod  # noqa: E402
-from data.loader import load_bars  # noqa: E402
+from data.loader import MANIFEST, OUT_DIR, _sha256, load_bars  # noqa: E402
+from quant.conventions import YEAR_SECONDS  # noqa: E402
+
+SPEC_VERSION = "2.0"
+MASTER_PATH = os.path.join(OUT_DIR, "breakout-master.parquet")
+MASTER_MANIFEST = os.path.join(OUT_DIR, "breakout-master-manifest.json")
 
 ATR_LOOKBACK_DAYS = 14   # prior-completed 14-day ATR
 TRAIL_DAYS = 20          # trailing window for the same-time-of-day volume baseline
+RV_TRAIL_DAYS = 20       # trailing window for the realized-vol baseline
+NDAY_LEVELS = (5, 20)    # prior N-day high/low "key levels" (completed days)
 ATTEMPT_CAP = 4          # attempt# capped (4 = "4th or later"); rare tail
+ANNUALIZE_1MIN = math.sqrt(YEAR_SECONDS / 60.0)
 # The split embargo MUST cover the longest feature lookback so a CALIB/VALID
 # day's window can't reach into TRAIN. Derived here (not hardcoded in the split)
 # so it cannot drift out of sync as features are added; +5-day buffer for holidays.
-MAX_FEATURE_LOOKBACK_DAYS = max(ATR_LOOKBACK_DAYS, TRAIL_DAYS)
+MAX_FEATURE_LOOKBACK_DAYS = max(ATR_LOOKBACK_DAYS, TRAIL_DAYS, RV_TRAIL_DAYS,
+                                max(NDAY_LEVELS))
 EMBARGO_DAYS = MAX_FEATURE_LOOKBACK_DAYS + 5
 
 # block 1 - breakout state (NEW); block 2 - volume/VWAP (NEW, SPY).
@@ -50,19 +62,31 @@ FEATURES = (
     "side_down",
     # block 2 - volume / participation
     "rel_vol_tod", "vol_surge", "vwap_dist_atr", "vol_trend",
+    # block 3 - today's tape (ATR-normalized)
+    "range_atr", "range_pos", "open_drive", "efficiency_ratio", "persist_count",
+    "rv_ratio", "gap_filled",
+    # block 4 - multi-day / regime / key levels
+    "gap_atr", "dist_pdh", "dist_pdl", "dist_hi20", "dist_lo20", "mom3d_atr",
+    "yest_close_pos", "vix1d_anchor", "vix1d_chg",
 )
 KEYS = ("day", "side", "attempt", "start_mod")
 TARGETS = ("reversed", "held_to_eod", "max_adverse_orw")
 
 
-def _atr14_by_day(spy_daily):
-    """prior-completed 14-day ATR per day (shift(1) = completed days only)."""
-    d = spy_daily.reset_index(drop=True)
+def _series_atr14(daily):
+    """prior-completed N-day ATR as a Series aligned to daily's reset index
+    (shift(1) = completed days only)."""
+    d = daily.reset_index(drop=True)
     tr = np.maximum(d["high"] - d["low"],
                     np.maximum((d["high"] - d["close"].shift()).abs(),
                                (d["low"] - d["close"].shift()).abs()))
-    atr = tr.rolling(14).mean().shift(1)
-    return dict(zip(d["ts"].dt.strftime("%Y-%m-%d"), atr))
+    return tr.rolling(ATR_LOOKBACK_DAYS).mean().shift(1)
+
+
+def _atr14_by_day(spy_daily):
+    """prior-completed 14-day ATR per day, as {day: atr}."""
+    d = spy_daily.reset_index(drop=True)
+    return dict(zip(d["ts"].dt.strftime("%Y-%m-%d"), _series_atr14(d)))
 
 
 def _tod_volume_baseline(vol_wide):
@@ -117,6 +141,113 @@ def volume_vwap(o, h, l, c, v, si, atr, tod_base):
             "vwap_dist_atr": vwap_dist, "vol_trend": trend}
 
 
+def tape_features(o, h, l, c, si, atr, close_y, rv_base):
+    """Block 3 - today's tape at the decision bar (close of breakout bar si).
+    PREFIX-ONLY: reads bars [:si+1] (through the breakout bar). ATR-normalized
+    (price fact, all-history) - adapted from v1 minute_features which used the
+    VIX1D implied move. rv_base = trailing realized-vol baseline (decimal)."""
+    px = float(c[si]); day_open = float(o[0])
+    hi = float(np.max(h[:si + 1])); lo = float(np.min(l[:si + 1]))
+    rng = hi - lo
+    out = {
+        "range_atr": rng / atr if atr and atr > 0 else np.nan,
+        "range_pos": (px - lo) / rng if rng > 1e-9 else np.nan,
+        "open_drive": (px - day_open) / atr if atr and atr > 0 else np.nan,
+    }
+    if si >= 2:
+        d = np.diff(c[:si + 1])
+        path = float(np.abs(d).sum())
+        out["efficiency_ratio"] = (px - day_open) / path if path > 0 else np.nan
+        last = d[-1]
+        if last == 0:
+            out["persist_count"] = 0.0
+        else:
+            sgn = np.sign(last); run = 0
+            for x in d[::-1]:
+                if np.sign(x) == sgn:
+                    run += 1
+                else:
+                    break
+            out["persist_count"] = float(sgn * run)
+    else:
+        out["efficiency_ratio"] = np.nan
+        out["persist_count"] = np.nan
+    if si >= 15:
+        r = np.diff(np.log(c[:si + 1]))
+        rv = float(r.std(ddof=1)) * ANNUALIZE_1MIN
+        out["rv_ratio"] = rv / rv_base if rv_base and rv_base > 0 else np.nan
+    else:
+        out["rv_ratio"] = np.nan
+    gap = day_open - close_y
+    if gap > 0:
+        out["gap_filled"] = int(lo <= close_y)
+    elif gap < 0:
+        out["gap_filled"] = int(hi >= close_y)
+    else:
+        out["gap_filled"] = 1
+    return out
+
+
+def _multiday_context(spy_daily, vix1d_daily, vix_daily):
+    """Per-day completed-prior-day context (all values for day d use data
+    through d-1 only). ATR/level distances normalized downstream by ATR. VIX1D
+    regime is recent-era (NaN before the VIX1D universe, ~2023-04)."""
+    d = spy_daily.reset_index(drop=True)
+    day = d["ts"].dt.strftime("%Y-%m-%d")
+    atr = _series_atr14(d)
+    hi_n = {n: d["high"].rolling(n).max().shift(1) for n in NDAY_LEVELS}
+    lo_n = {n: d["low"].rolling(n).min().shift(1) for n in NDAY_LEVELS}
+    v1 = dict(zip(vix1d_daily["ts"].dt.strftime("%Y-%m-%d"), vix1d_daily["close"]))
+    vx = dict(zip(vix_daily["ts"].dt.strftime("%Y-%m-%d"), vix_daily["close"]))
+    ctx = {}
+    for j in range(1, len(d)):
+        dd = day.iloc[j]; prev = d.iloc[j - 1]; pday = day.iloc[j - 1]
+        ctx[dd] = {
+            "close_y": float(prev["close"]), "high_y": float(prev["high"]),
+            "low_y": float(prev["low"]),
+            "close_y3": float(d["close"].iloc[j - 4]) if j >= 4 else np.nan,
+            "atr14": float(atr.iloc[j]) if not np.isnan(atr.iloc[j]) else np.nan,
+            "hi20": float(hi_n[20].iloc[j]), "lo20": float(lo_n[20].iloc[j]),
+            "vix1d_prior": v1.get(pday, np.nan),
+            "vix1d_2back": (v1.get(day.iloc[j - 2]) if j >= 2 else np.nan),
+            "vix_prior": vx.get(pday, np.nan),
+        }
+    return ctx
+
+
+def multiday_features(px, day_open, ctx):
+    """Block 4 - multi-day / regime at the decision price px (the breakout close)
+    on day with completed-prior context ctx. ATR-normalized; NaN-safe."""
+    atr = ctx["atr14"]
+    inv = (1.0 / atr) if atr and atr > 0 and not np.isnan(atr) else np.nan
+    yr = ctx["high_y"] - ctx["low_y"]
+    v1p, v2b = ctx["vix1d_prior"], ctx["vix1d_2back"]
+    return {
+        "gap_atr": (day_open - ctx["close_y"]) * inv,
+        "dist_pdh": (ctx["high_y"] - px) * inv,
+        "dist_pdl": (px - ctx["low_y"]) * inv,
+        "dist_hi20": (ctx["hi20"] - px) * inv,
+        "dist_lo20": (px - ctx["lo20"]) * inv,
+        "mom3d_atr": ((ctx["close_y"] - ctx["close_y3"]) * inv
+                      if not np.isnan(ctx["close_y3"]) else np.nan),
+        "yest_close_pos": (ctx["close_y"] - ctx["low_y"]) / yr if yr > 1e-9 else np.nan,
+        "vix1d_anchor": v1p if v1p and not np.isnan(v1p) else np.nan,
+        "vix1d_chg": (math.log(v1p / v2b)
+                      if v1p and v2b and not np.isnan(v1p) and not np.isnan(v2b)
+                      else np.nan),
+    }
+
+
+def _realized_vol_baseline(spy):
+    """Trailing RV_TRAIL_DAYS median of each day's intraday realized vol
+    (annualized, decimal), prior-day only. Returns {day: rv_base}."""
+    rv = spy.groupby("day")["close"].apply(
+        lambda s: float(np.diff(np.log(s.to_numpy())).std(ddof=1)) * ANNUALIZE_1MIN
+        if len(s) > 2 else np.nan)
+    base = rv.shift(1).rolling(RV_TRAIL_DAYS, min_periods=5).median()
+    return base.to_dict()
+
+
 def build(start="2008-01-01", end=None, _unlocked_full_span=False):
     """Assemble the event-bar table (one row per breakout event, scored at its
     decision bar) with the v2 features + targets. By default the loader truncates
@@ -133,6 +264,12 @@ def build(start="2008-01-01", end=None, _unlocked_full_span=False):
     spy_daily = load_bars("SPY", freq="1day",
                           _unlocked_full_span=_unlocked_full_span)
     atr_by_day = _atr14_by_day(spy_daily)
+    vix1d_daily = load_bars("VIX1D", freq="1day",
+                            _unlocked_full_span=_unlocked_full_span)
+    vix_daily = load_bars("VIX", freq="1day",
+                          _unlocked_full_span=_unlocked_full_span)
+    mctx = _multiday_context(spy_daily, vix1d_daily, vix_daily)
+    rv_base = _realized_vol_baseline(spy)
 
     # trailing same-time-of-day volume baseline (pivot day x minute, prior-day roll)
     vw = spy.pivot_table(index="day", columns="mod", values="volume",
@@ -147,6 +284,11 @@ def build(start="2008-01-01", end=None, _unlocked_full_span=False):
         l = bars["low"].to_numpy(); c = bars["close"].to_numpy()
         v = bars["volume"].to_numpy()
         atr = atr_by_day.get(day, np.nan)
+        ctx = mctx.get(day)
+        if ctx is None:
+            continue                          # first trading day - no prior context
+        day_open = float(o[0])
+        rvb = rv_base.get(day, np.nan)
         for ev in ev_day.to_dict("records"):
             si = int(np.searchsorted(mods, ev["start_mod"]))
             if si >= len(mods) or mods[si] != ev["start_mod"]:
@@ -159,6 +301,8 @@ def build(start="2008-01-01", end=None, _unlocked_full_span=False):
                    "max_adverse_orw": ev["max_adverse_orw"]}
             row.update(breakout_state(ev, atr))
             row.update(volume_vwap(o, h, l, c, v, si, atr, tb))
+            row.update(tape_features(o, h, l, c, si, atr, ctx["close_y"], rvb))
+            row.update(multiday_features(float(c[si]), day_open, ctx))
             rows.append(row)
 
     df = pd.DataFrame(rows)
@@ -176,14 +320,51 @@ def split():
     return v2_split(min_gap_days=EMBARGO_DAYS)
 
 
+def save_master(df):
+    """Persist the DEV master table + a hashed manifest (provenance: the loader
+    manifest hash, spec version, feature list, row count)."""
+    df.to_parquet(MASTER_PATH, index=False)
+    man = {
+        "spec_version": SPEC_VERSION,
+        "built_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+        "loader_manifest_sha256": _sha256(MANIFEST),
+        "n_rows": int(len(df)), "n_features": len(FEATURES),
+        "n_days": int(df["day"].nunique()), "features": list(FEATURES),
+        "day_span": [df["day"].min(), df["day"].max()],
+        "parquet_sha256": _sha256(MASTER_PATH),
+    }
+    json.dump(man, open(MASTER_MANIFEST, "w"), indent=2)
+    return man
+
+
+def load_master():
+    """Load the persisted DEV master, hash-verified against its manifest."""
+    if not os.path.exists(MASTER_MANIFEST):
+        raise FileNotFoundError(
+            "breakout-master not built - run 'breakout_features.py build'")
+    man = json.load(open(MASTER_MANIFEST))
+    if _sha256(MASTER_PATH) != man["parquet_sha256"]:
+        raise RuntimeError(
+            "breakout-master.parquet does not match its manifest hash - rebuild")
+    return pd.read_parquet(MASTER_PATH)
+
+
 if __name__ == "__main__":
     import argparse
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", nargs="?", default="sample")
+    ap.add_argument("cmd", nargs="?", default="sample",
+                    help="build = full DEV table -> parquet+manifest; "
+                         "sample = print a date-bounded summary")
     ap.add_argument("--start", default="2024-01-01")
     ap.add_argument("--end", default=None)
     a = ap.parse_args()
-    df = build(start=a.start, end=a.end)
-    print(f"{len(df):,} event-rows x {len(FEATURES)} features "
-          f"({df['day'].min()}..{df['day'].max()})")
-    print(df[list(FEATURES)].describe().T[["mean", "std", "min", "max"]].round(3))
+    if a.cmd == "build":
+        df = build()                          # full DEV span (loader self-locks)
+        man = save_master(df)
+        print(f"breakout-master: {man['n_rows']:,} rows x {man['n_features']} "
+              f"features over {man['n_days']:,} days {man['day_span']}")
+    else:
+        df = build(start=a.start, end=a.end)
+        print(f"{len(df):,} event-rows x {len(FEATURES)} features "
+              f"({df['day'].min()}..{df['day'].max()})")
+        print(df[list(FEATURES)].describe().T[["mean", "std", "min", "max"]].round(3))
