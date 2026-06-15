@@ -298,7 +298,9 @@ def build(start="2008-01-01", end=None, _unlocked_full_span=False):
             row = {"day": day, "side": ev["side"], "attempt": ev["attempt"],
                    "start_mod": ev["start_mod"], "tradeable": ev["tradeable"],
                    "reversed": ev["reversed"], "held_to_eod": ev["held_to_eod"],
-                   "max_adverse_orw": ev["max_adverse_orw"]}
+                   "max_adverse_orw": ev["max_adverse_orw"],
+                   # benchmark only (NOT a feature): the 5-bar rule's greenlight
+                   "confirmed_5bar": ev["confirmed_5bar"]}
             row.update(breakout_state(ev, atr))
             row.update(volume_vwap(o, h, l, c, v, si, atr, tb))
             row.update(tape_features(o, h, l, c, si, atr, ctx["close_y"], rvb))
