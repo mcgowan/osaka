@@ -142,11 +142,36 @@ pieces:
 ## 7. Success criteria / pre-registered kill criterion
 
 Two bars, both required:
-1. **Statistical (full history):** on held-out (day-clustered) data in the
-   tradeable window, beat the 5-bar rule by a pre-specified margin at flagging
-   adverse-reversal breakouts, stable across sub-periods. Value must come from
-   **correct disagreements** with the 5-bar rule (confirming good breakouts it
-   misses; declining ones that survive 5 bars then fail).
+1. **Statistical — FROZEN, pre-registered 2026-06-14 (trader-ratified). No
+   moving any value below after modeling starts.**
+   - *Evaluation set:* the held-out **VALID** region of the day-clustered dev
+     split (`breakout_features.split()`), tradeable window [10:00, 15:00) ET.
+     The locked test (>= V2_TEST_START) is NOT touched here — it is the §7.2
+     economic judge's, run once.
+   - *Benchmark, measured on the SAME set:* the 5-bar rule's greenlit
+     (confirmed) reversal rate **on VALID** — 39.5% as of 2026-06-14 (NOT the
+     pooled 35.7%; VALID is a higher-reversal regime). The benchmark is always
+     recomputed on the evaluation set, never assumed.
+   - *Operating point:* threshold the model's reversal probability — chosen on
+     **CALIB, never on VALID** — so it greenlights the same *fraction* of VALID
+     breakouts as the 5-bar rule (its realized selectivity, ~46.7% on VALID).
+   - *Margin (PASS):* model greenlit reversal rate **<= 0.83 x the 5-bar rule's
+     greenlit rate on the same set** (>= 17% relative reduction; ~33% absolute
+     at the current 39.5% bar) AND the **paired day-clustered (resample-days)
+     95% bootstrap CI of the difference excludes 0** (the ~3.6pp day-clustered
+     noise floor makes smaller margins vacuous).
+   - *Stability:* the improvement holds (same sign, does not collapse) in **each
+     calendar-year sub-period** of VALID and in the NFR-2.1b slices (early
+     session, near-strike stress, post-breakout retest).
+   - *Confound guard (HARD requirement, not report-only):* the improvement must
+     **survive within start-hour strata** — value must come from **correct
+     within-context disagreements** with the 5-bar rule, NOT from skimming the
+     known base-rate covariates (start hour 10:00 reverses ~50% vs 14:00 ~24%;
+     1st attempt ~47% vs 2nd+ ~39%). A pooled win fully explained by a shift in
+     the start-hour/attempt mix is a FAIL.
+   - *Secondary (reported, non-gating):* at the 5-bar rule's reversal rate the
+     model greenlights *more* (higher recall) — confirms the whole
+     selectivity/reversal trade-off curve dominates, not one cherry-picked point.
 2. **Economic (chain era, Dec 2024→):** the model's conviction calls must **pay
    in real recorded-chain spread P&L** — high-conviction breakouts net positive,
    skip-the-dud-take-the-later-one beats the naive rule — on *every* breakout
@@ -154,11 +179,11 @@ Two bars, both required:
    (label) must translate to dollars (judge); if it can't, that's a kill even if
    bar 1 passes.
 
-**Kill** (documented negative, stop) if it can't clear the 5-bar rule by the
-margin, the edge is one-sub-period-only, "ML alone" needs the gates it was meant
-to replace, or the conviction signal doesn't pay in chain dollars. *Open item:*
-fix the exact metric + margin with the trader (depends on his economics) before
-modeling — pre-registered, no moving it after.
+**Kill** (documented negative, stop) if it can't clear the §7.1 margin with
+day-clustered significance, the edge is one-sub-period-only or vanishes within
+start-hour strata, "ML alone" needs the gates it was meant to replace, or the
+conviction signal doesn't pay in chain dollars (§7.2). Both bars frozen above;
+no moving them after modeling starts.
 
 ## 8. Phases (gated; trader signs off each)
 
@@ -176,6 +201,13 @@ modeling — pre-registered, no moving it after.
     tradeable window; ablations (full-stack replacement; ML-alone vs ML+gates
     overlap; volume value; multi-day value; feature pruning); honesty check vs
     option-implied.
+    - *Eval-build notes (from the §7.1 freeze — honor at implementation):*
+      (a) the 5-bar benchmark is **recomputed on whatever rows are being scored**
+      and the PASS bar is `0.83 ×` that live rate — never hard-code 0.395/0.33,
+      so a VALID regime shift can't move the goalposts. (b) The confound guard
+      needs **start-hour strata wired into the slice machinery** (extend the v1
+      NFR-2.1b slices with start-hour; the per-bucket within-strata test is
+      gating, not report-only) — without the strata the guard is just prose.
   - *Economic (recorded-chain backtest, Dec 2024→):* price the spread P&L of the
     model's conviction calls on **every breakout including untraded** from
     `eleuthera/events/` real marks (reuse the v1 chain-marking machinery,
@@ -200,10 +232,13 @@ new question pointed at a beatable bar, on top of a proven, honest pipeline.
    replaced 2026-06-14).
 2. ~~v2 locked-test boundary~~ — **RESOLVED: V2_TEST_START = 2025-07-01**
    (ratified 2026-06-14).
-3. The exact "beats the 5-bar rule" metric + margin for the kill criterion
-   (depends on the trader's economics; pre-register before modeling). The 5-bar
-   rule is a **weak reversal filter** (confirmed breakouts still reverse ~36% vs
-   ~44% unconfirmed) — that gap is the room to beat.
+3. ~~The exact "beats the 5-bar rule" metric + margin for the kill criterion~~
+   — **RESOLVED: pre-registered 2026-06-14 (trader-ratified), frozen in §7.1.**
+   Matched-selectivity greenlit-reversal-rate vs the 5-bar rule on VALID, margin
+   >= 17% relative (~33% abs at the 39.5% bar) with day-clustered significance, a
+   HARD within-start-hour confound guard, and per-year stability. The 5-bar rule
+   is a **weak reversal filter** (greenlit breakouts still reverse 39.5% on VALID
+   vs ~44% unconfirmed) — that gap is the room to beat.
 4. 1-min history depth (2008 default; extend toward 1993 only if warranted —
    regime drift caveat).
 5. Whether to also validate against the full live stack later (needs the
