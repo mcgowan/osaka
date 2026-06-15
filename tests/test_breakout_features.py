@@ -171,6 +171,27 @@ def test_build_smoke_has_features_and_label():
     assert not ({"or_high", "or_low", "start_close"} & set(df.columns))
 
 
+def test_v2_walk_forward_injects_derived_embargo(monkeypatch):
+    # the v2 walk-forward entry must force the 25-day feature embargo into the
+    # fold builder, not inherit v1's 5-day default (leakage-redteam MEDIUM)
+    import data.breakout_features as bf
+    from models import oof
+    captured = {}
+
+    def fake_folds(days, **kw):
+        captured.update(kw)
+        return [(["2010-01-04"], ["2010-01-05"])]
+
+    monkeypatch.setattr(oof, "walk_forward_folds", fake_folds)
+
+    class S:
+        train_days = ["2010-01-04", "2010-01-05"]
+
+    bf.walk_forward_oof(pd.DataFrame({"day": []}),
+                        fit_predict=lambda f, v: [], split_obj=S())
+    assert captured.get("min_gap_days") == bf.EMBARGO_DAYS
+
+
 def test_load_master_hash_verified_if_built():
     from data.breakout_features import MASTER_MANIFEST, load_master
     if not os.path.exists(MASTER_MANIFEST):

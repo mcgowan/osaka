@@ -320,6 +320,18 @@ def split():
     return v2_split(min_gap_days=EMBARGO_DAYS)
 
 
+def walk_forward_oof(master, fit_predict, label="pred", split_obj=None, **fold_kw):
+    """v2 walk-forward OOF over the TRAIN folds, with the fold embargo DERIVED
+    from the feature lookbacks (EMBARGO_DAYS) so it CANNOT inherit the smaller
+    v1 default in models.oof/splits (leakage-redteam MEDIUM, 2026-06-14: a 5-day
+    fold gap would let a val day's 20-day feature window read into the fit block).
+    Use THIS for v2 modeling, never the raw models.oof helper."""
+    from models import oof as _oof
+    fold_kw.setdefault("min_gap_days", EMBARGO_DAYS)
+    return _oof.walk_forward_oof(master, split_obj or split(), fit_predict,
+                                 label=label, **fold_kw)
+
+
 def save_master(df):
     """Persist the DEV master table + a hashed manifest (provenance: the loader
     manifest hash, spec version, feature list, row count)."""
