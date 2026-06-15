@@ -10,7 +10,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from data.breakouts import (day_events, opening_range, OR_BARS, CUTOFF_MIN,  # noqa: E402
-                            MIN_OR_BARS)
+                            MIN_OR_BARS, REVERSAL_K)
 
 OR_HIGH, OR_LOW = 100.0, 90.0
 
@@ -70,6 +70,24 @@ def test_confirmed_requires_five_closes():
     assert _ev(ev4, "up", 1)["confirmed_5bar"] == 0
     ev5 = day_events("2020-01-02", make_day([105] * 5 + [95]))   # 5 then fail
     assert _ev(ev5, "up", 1)["confirmed_5bar"] == 1
+
+
+def test_max_adverse_excursion():
+    # OR=[90,100] (width 10); break up, entry close=105, then dip to low 95,
+    # recover. Adverse = entry(105) - min low AFTER entry(95) = 10 -> 1.0 OR-width.
+    rows = [dict(mod=m, high=100.0, low=90.0, close=95.0, volume=1e3)
+            for m in range(OR_BARS)]
+    for i, (c, h, lo) in enumerate([(105, 107, 104), (105, 106, 95), (105, 108, 103)]):
+        rows.append(dict(mod=OR_BARS + i, high=float(h), low=float(lo),
+                         close=float(c), volume=1e3))
+    e = _ev(day_events("2020-01-02", pd.DataFrame(rows)), "up", 1)
+    assert abs(e["max_adverse_orw"] - 1.0) < 1e-9 and e["held_to_eod"] == 1
+    # max_adverse_orw 1.0 >= REVERSAL_K (1.0) -> labeled reversed
+    assert e["reversed"] == int(1.0 >= REVERSAL_K)
+    # entry on the last bar of the day -> no forward path -> zero adverse
+    last = day_events("2020-01-02", make_day([105], start_mod=380))
+    le = _ev(last, "up", 1)
+    assert le["max_adverse_orw"] == 0.0 and le["reversed"] == 0
 
 
 def test_tradeable_flag_respects_cutoff():

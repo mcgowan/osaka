@@ -14,24 +14,36 @@ DEFINITIONS (frozen, docs/v2-plan.md §4):
   while it keeps closing outside; TERMINATES + re-arms at the first bar that
   closes back at/inside the boundary. (A close through to the other side also
   terminates — it is no longer "above/below the OR".)
-- Label: held_to_eod = the event never terminated before the session close.
-  Per the no-reentry decision, a single close back inside = failure, period.
-- 5-bar rule (incumbent): an event is "confirmed" iff it strings >= 5
-  consecutive closes outside before terminating (it would fire at bar 5). Since
-  an event is consecutive-closes-outside by construction, confirmed <=>
-  n_closes_outside >= 5.
+- PRIMARY label (adverse-reversal, price fact): max_adverse_orw = the largest
+  adverse excursion AFTER the breakout, from the breakout close (entry proxy) to
+  the lowest low (up) / highest high (down) through EOD, normalized by the OR
+  width. A breakout `reversed` iff max_adverse_orw >= REVERSAL_K. K=1.0 is FROZEN
+  (trader-ratified 2026-06-14): calibrated against the 103 pre-locked logged
+  trades, where it flags 66% of real losers vs only 16% of winners, and cleanly
+  separates real winners (max_adverse_orw med ~0.3) from losers (~1.7). This is
+  the target the model predicts: weak / violently-reversing breakouts to avoid
+  entering (it maps to the OR-puncture `risk_off_reversal` exit, the -$96k pool;
+  the strike-relative `sr_inner_breach` exit is downstream strike construction,
+  out of scope). NO sigma/greeks - pure price, OR-width units (labels-are-price-
+  facts discipline carried from v1). See analysis/breakout_label_calib.py.
+- SECONDARY: held_to_eod = the event never closed back inside the OR before the
+  close (the old no-reentry signal; kept as a feature/diagnostic, not the target).
+- 5-bar rule (incumbent benchmark): an event is "confirmed" iff it strings >= 5
+  consecutive closes outside before terminating. confirmed <=> n_closes_outside
+  >= 5 (consecutive-closes-outside by construction).
 
-POINT-IN-TIME: the OR uses bars[:30]; the label uses the rest of the day (labels
-may see the future — they are outcomes). Per-bar FEATURES (Phase 2) are strictly
-prefix-only and harness-checked; nothing here is fed to the model as a feature.
+POINT-IN-TIME: the OR uses bars[:30]; labels (held_to_eod, max_adverse_orw) scan
+the rest of the day - they are OUTCOMES and may see the future. Per-bar FEATURES
+(Phase 2) are strictly prefix-only and harness-checked; nothing here is a feature.
 
 Instrument: SPY (has volume). Tradeable window for evaluation: events starting
-in [10:00, 12:00) (OR-finalized -> cutoff). Train broad (all-day), judge narrow.
+in [10:00, 15:00) ET (OR-finalized -> cutoff). Train broad (all-day), judge narrow.
 """
 
 import os
 import sys
 
+import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -41,11 +53,13 @@ OR_BARS = 30            # first 30 min form the OR; OR finalized at minute 30
 CUTOFF_MIN = 330        # 15:00 ET — end of the trader's tradeable entry window
 CONFIRM_BARS = 5        # the 5-bar incumbent
 MIN_OR_BARS = 25        # need this many of the first 30 bars to trust the OR
+REVERSAL_K = 1.0        # FROZEN (trader-ratified 2026-06-14): a breakout
+                        # `reversed` iff its adverse give-back >= 1.0 OR-width
 
-# PROPOSED v2 locked-test boundary — TRADER TO RATIFY. Chosen so the locked test
-# (>= this date) is fully covered by the recorded option chains (Dec 2024->),
-# enabling the Phase-4 chain-based economic judge on the untouched test set,
-# while leaving ~16 years for development.
+# v2 locked-test boundary — RATIFIED 2026-06-14. Days >= this are sealed for the
+# Phase-4 chain economic judge (191 logged trades) and never enter training; the
+# 103 earlier chain-era trades calibrated the label. Fully covered by recorded
+# chains (Dec 2024->); leaves ~16 years of price history for development.
 V2_TEST_START = "2025-07-01"
 
 SIDES = ("up", "down")
@@ -64,6 +78,17 @@ def opening_range(day_df):
     return float(orb["high"].max()), float(orb["low"].min())
 
 
+def _adverse_orw(up, st_close, st_idx, suf_min_low, suf_max_high, or_width):
+    """Max adverse excursion AFTER entry (bar st_idx's close), in OR-width units.
+    suf_min_low[i]/suf_max_high[i] are the extreme low/high over bars strictly
+    after i (entry is the close of bar i, so the adverse path starts next bar)."""
+    ext = suf_min_low[st_idx] if up else suf_max_high[st_idx]
+    if not np.isfinite(ext):                  # entry was the last bar of the day
+        return 0.0
+    adv = (st_close - ext) if up else (ext - st_close)
+    return max(0.0, float(adv)) / or_width
+
+
 def day_events(day, day_df):
     """All OR-breakout events for one day (both sides). day_df: that day's SPY
     1-min bars with a 'mod' column, ascending."""
@@ -73,42 +98,61 @@ def day_events(day, day_df):
     or_high, or_low = rng
     or_width = or_high - or_low
     post = day_df[day_df["mod"] >= OR_BARS]
-    if len(post) == 0:
+    n = len(post)
+    if n == 0 or or_width <= 0:
         return []
-    last_mod = int(post["mod"].iloc[-1])
+    mods = post["mod"].to_numpy()
+    closes = post["close"].to_numpy()
+    lows = post["low"].to_numpy()
+    highs = post["high"].to_numpy()
+    vols = post["volume"].to_numpy()
+    # suffix extremes over bars strictly after index i (for the adverse scan)
+    suf_min_low = np.full(n, np.inf)
+    suf_max_high = np.full(n, -np.inf)
+    for i in range(n - 2, -1, -1):
+        suf_min_low[i] = min(lows[i + 1], suf_min_low[i + 1])
+        suf_max_high[i] = max(highs[i + 1], suf_max_high[i + 1])
+    last_mod = int(mods[-1])
     events = []
     for side in SIDES:
+        up = side == "up"
         attempt = 0
         in_ep = False
-        st_mod = st_close = st_vol = n_out = None
-        for b in post.itertuples(index=False):
-            outside = (b.close > or_high) if side == "up" else (b.close < or_low)
+        st_idx = st_mod = st_close = st_vol = n_out = None
+        for i in range(n):
+            outside = (closes[i] > or_high) if up else (closes[i] < or_low)
             if outside:
                 if not in_ep:
                     in_ep = True
                     attempt += 1
-                    st_mod, st_close = int(b.mod), float(b.close)
-                    st_vol = float(b.volume)
+                    st_idx, st_mod = i, int(mods[i])
+                    st_close, st_vol = float(closes[i]), float(vols[i])
                     n_out = 1
                 else:
                     n_out += 1
             elif in_ep:                       # closed back inside/through -> FAIL
-                events.append(_ev(day, side, attempt, st_mod, int(b.mod),
+                events.append(_ev(day, side, attempt, st_mod, int(mods[i]),
                                   n_out, False, or_high, or_low, or_width,
-                                  st_close, st_vol))
+                                  st_close, st_vol,
+                                  _adverse_orw(up, st_close, st_idx, suf_min_low,
+                                               suf_max_high, or_width)))
                 in_ep = False
         if in_ep:                             # never terminated -> held to EOD
             events.append(_ev(day, side, attempt, st_mod, last_mod, n_out,
-                              True, or_high, or_low, or_width, st_close, st_vol))
+                              True, or_high, or_low, or_width, st_close, st_vol,
+                              _adverse_orw(up, st_close, st_idx, suf_min_low,
+                                           suf_max_high, or_width)))
     return events
 
 
 def _ev(day, side, attempt, start_mod, end_mod, n_out, held, oh, ol, ow,
-        st_close, st_vol):
+        st_close, st_vol, max_adverse_orw):
     return {
         "day": day, "side": side, "attempt": attempt,
         "start_mod": start_mod, "end_mod": end_mod,
         "n_closes_outside": n_out, "held_to_eod": int(held),
+        "max_adverse_orw": max_adverse_orw,
+        "reversed": int(max_adverse_orw >= REVERSAL_K),
         "confirmed_5bar": int(n_out >= CONFIRM_BARS),
         "tradeable": int(OR_BARS <= start_mod < CUTOFF_MIN),
         "or_high": oh, "or_low": ol, "or_width": ow,

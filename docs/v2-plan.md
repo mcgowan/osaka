@@ -8,8 +8,9 @@ the *question* is new.
 ## 1. What this is
 
 A model that scores the **conviction of an opening-range (OR) breakout
-EVENT**: given a breakout in progress, the probability it **holds** (never
-closes back inside the OR) through to settlement. It scores **every breakout
+EVENT**: given a breakout in progress, the probability it **reverses** (gives
+back >= 1 opening-range width against you before EOD — a weak/violent-reversal
+breakout you'd be stopped on; see §4). It scores **every breakout
 event** (per side, potentially several a day) **independently of whether the
 trader would enter** — entry needs the other eleuthera gates, which is the
 trader's job downstream. The trader composes the conviction score into his own
@@ -80,21 +81,29 @@ signs off each phase). New for v2:
 - **Incumbent (the bar to beat):** 5 consecutive 1-min closes fully outside the
   OR, no buffer, close-based reset (aligned to the event definition; a minor
   simplification of the live intrabar reset).
-- **Label (success) — FROZEN: no-reentry.** A breakout event succeeds iff it
-  **never closes back inside the OR before EOD**; the first close back inside =
-  failure, period. This is self-consistent with the event/re-arm structure (the
-  episode *is* the breakout run) and matches eleuthera's own gate logic. It is
-  deliberately **not** the trader's P&L (a break that recedes, recovers, and
-  settles beyond the short strike is a "failure" here but a winning trade) —
-  the trader accepts this and handles entry/management separately; the model is
-  one clean input, not a win-probability. (`settle-beyond` was considered and
-  rejected: it doesn't compose with re-arm, and it collapses to a daily
-  directional call near v1's efficient-pricing wall.) Expect a **low base
-  rate** — holding flawlessly to EOD with zero re-entry is stringent.
+- **Label (failure) — FROZEN: adverse-reversal, K=1.0** (trader-ratified
+  2026-06-14, superseding the original no-reentry label). A breakout `reversed`
+  iff its **max adverse give-back from the breakout close reaches >= 1.0 OR-widths
+  before EOD** (up: lowest low; down: highest high) — a pure **price fact**, no
+  sigma/greeks (v1 labels-are-price-facts discipline). This is the **target the
+  model predicts**: weak / violently-reversing breakouts to *avoid entering*.
+  - *Why this, not no-reentry:* the 63%-win-rate reconciliation showed no-reentry
+    (hold flawlessly to EOD) is disconnected from the trader's P&L — most winning
+    spreads re-enter the OR yet stay beyond the far short strike. The trader's
+    real target is **reducing stop-losses from weak breakouts / violent
+    reversals**.
+  - *Calibration (`analysis/breakout_label_calib.py`):* against the 103 pre-locked
+    logged trades, max_adverse_orw separates real winners (med ~0.30) from losers
+    (~1.67); K=1.0 flags **66% of real losers vs 16% of winners**.
+  - *Scope:* the OR-relative label maps to the `risk_off_reversal` exit (price
+    punctures the OR — the −$96k pool, a breakout-conviction failure). The
+    `sr_inner_breach` exit (near-strike S/R) is **strike-relative**, depends on
+    strike selection, and is downstream — out of scope for the conviction model.
+  - `held_to_eod` (old no-reentry) is retained as a secondary diagnostic/feature.
 - **Decision surface:** the model emits a per-bar probability over a breakout
   event's life. Train on **all-day** events; **evaluate** on the tradeable
-  window (OR-finalized → 12:00 cutoff). Entry/sizing/management is the trader's
-  downstream composition, not the model's.
+  window (OR-finalized → 15:00 ET cutoff = the trader's 12:00 PST cutoff).
+  Entry/sizing/management is the trader's downstream composition, not the model's.
 
 ## 5. Features
 
@@ -134,8 +143,8 @@ pieces:
 
 Two bars, both required:
 1. **Statistical (full history):** on held-out (day-clustered) data in the
-   tradeable window, beat the 5-bar rule by a pre-specified margin at separating
-   hold-to-EOD breakouts, stable across sub-periods. Value must come from
+   tradeable window, beat the 5-bar rule by a pre-specified margin at flagging
+   adverse-reversal breakouts, stable across sub-periods. Value must come from
    **correct disagreements** with the 5-bar rule (confirming good breakouts it
    misses; declining ones that survive 5 bars then fail).
 2. **Economic (chain era, Dec 2024→):** the model's conviction calls must **pay
@@ -186,10 +195,17 @@ new question pointed at a beatable bar, on top of a proven, honest pipeline.
 
 ## 10. Open items to confirm before modeling
 
-1. ~~Label: no-reentry vs settle-beyond~~ — **RESOLVED: no-reentry** (§4).
-2. The exact "beats the 5-bar rule" metric + margin for the kill criterion
-   (depends on the trader's economics; pre-register before modeling).
-3. 1-min history depth (2008 default; extend toward 1993 only if warranted —
+1. ~~Label: no-reentry vs settle-beyond~~ → ~~no-reentry~~ — **RESOLVED:
+   adverse-reversal, K=1.0** (§4; no-reentry shown disconnected from P&L and
+   replaced 2026-06-14).
+2. ~~v2 locked-test boundary~~ — **RESOLVED: V2_TEST_START = 2025-07-01**
+   (ratified 2026-06-14).
+3. The exact "beats the 5-bar rule" metric + margin for the kill criterion
+   (depends on the trader's economics; pre-register before modeling). The 5-bar
+   rule is a **weak reversal filter** (confirmed breakouts still reverse ~36% vs
+   ~44% unconfirmed) — that gap is the room to beat.
+4. 1-min history depth (2008 default; extend toward 1993 only if warranted —
    regime drift caveat).
-4. Whether to also validate against the full live stack later (needs the
-   eleuthera trade log; not required for the core build).
+5. Whether to also validate against the full live stack later (needs the
+   eleuthera trade log + reproducing pressure/risk as *approximate benchmarks*,
+   not labels; not required for the core build).
