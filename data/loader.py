@@ -27,10 +27,14 @@ Load (the API):
     load_bars verifies the parquet's sha256 against the manifest on every
     call, so silently regenerated/corrupted datasets fail loudly.
 
-LOCKED TEST SET (inviolable rule #3): TEST_START below is the test-period
-boundary, declared 2026-06-11 after a leakage-redteam BLOCK (Phase 2 review
-finding F1). load_bars and data.labels.load_labels TRUNCATE at TEST_START by
-default. The escape hatch `_unlocked_full_span=True` exists ONLY for:
+LOCKED TEST SET (inviolable rule #3): each symbol has a locked-test boundary
+(LOCKED_BOUNDARY) - TEST_START for the v1 instruments (SPX/VIX/VIX1D, declared
+2026-06-11 after a leakage-redteam BLOCK, Phase 2 finding F1) and the earlier
+V2_TEST_START for SPY (the v2 instrument, ratified 2026-06-14). load_bars,
+trading_days, and data.labels.load_labels TRUNCATE each symbol at its boundary
+by DEFAULT, so the ordinary code path cannot see locked data for any symbol -
+the protection is structural, not a per-call-site convention. The escape hatch
+`_unlocked_full_span=True` exists ONLY for:
   (a) dataset builders (they write locked-period artifacts without analyzing
       them),
   (b) FR-5.3 trade-log validation scripts (mandated full-log contact, no
@@ -62,15 +66,21 @@ MANIFEST = os.path.join(OUT_DIR, "manifest.json")
 
 LOADER_VERSION = 1
 TEST_START = "2025-12-01"   # v1 locked test boundary - see module docstring
+V2_TEST_START = "2025-07-01"  # v2 (SPY/OR-breakout) locked boundary, ratified
+                              # 2026-06-14; sealed for the Phase-4 chain judge
 SYMBOLS = ("SPX", "VIX", "VIX1D", "SPY")
 FREQS = ("1min", "1day")
 COLS = ["open", "high", "low", "close"]
 
-# v1's locked-test discipline (TEST_START truncation in load_bars) applies to
-# the v1 instruments only. SPY is the v2 (OR-breakout) instrument; v2 defines
-# and enforces its OWN locked-test boundary at the split layer (v2 Phase 1),
-# so SPY loads full-span here.
-V1_LOCKED_SYMBOLS = {"SPX", "VIX", "VIX1D"}
+# Locked-test discipline (rule #3) is STRUCTURAL: load_bars / trading_days
+# truncate each symbol at its own boundary by default, so the ordinary code
+# path cannot see locked data. v1 instruments lock at TEST_START; SPY (the v2
+# instrument) locks at its own, earlier V2_TEST_START. Sanctioned dataset
+# builders / the Phase-4 judge pass _unlocked_full_span=True (greppable).
+LOCKED_BOUNDARY = {
+    "SPX": TEST_START, "VIX": TEST_START, "VIX1D": TEST_START,
+    "SPY": V2_TEST_START,
+}
 # SPY (ETF) carries real TRADES volume - the reason v2 uses it over the
 # volumeless SPX index. Its raw CSV has a 6th column.
 VOLUME_SYMBOLS = {"SPY"}
@@ -137,7 +147,12 @@ def build(only=None):
     SPY for v2 without re-reading the multi-GB SPX CSV or invalidating v1's
     pinned-hash artifacts. A full build (only=None) regenerates everything."""
     os.makedirs(OUT_DIR, exist_ok=True)
-    if only and os.path.exists(MANIFEST):
+    if only and not os.path.exists(MANIFEST):
+        raise FileNotFoundError(
+            f"build(only={only!r}) merges into an existing manifest, but none "
+            f"exists - run a full build (only=None) first so the calendar and "
+            f"the other instruments are present")
+    if only:
         manifest = load_manifest()
         manifest["built_utc"] = datetime.now(timezone.utc).strftime(
             "%Y-%m-%d %H:%M:%S")
@@ -287,10 +302,11 @@ def load_bars(symbol, freq="1min", start=None, end=None,
     [ts, open, high, low, close(, volume for SPY)], ts ascending, ET
     timestamps, RTH only. start/end are inclusive 'YYYY-MM-DD' date bounds.
 
-    For v1 instruments (SPX/VIX/VIX1D) rows on/after TEST_START are EXCLUDED
-    unless _unlocked_full_span=True (sanctioned callers only - module docstring,
-    rule #3). SPY (v2) is NOT under the v1 lock; v2 enforces its own locked-test
-    boundary at the split layer."""
+    Rows on/after the symbol's locked boundary (LOCKED_BOUNDARY: TEST_START for
+    v1 instruments, V2_TEST_START for SPY) are EXCLUDED unless
+    _unlocked_full_span=True (sanctioned callers only - module docstring,
+    rule #3). The truncation is structural: the default path cannot see locked
+    data for ANY symbol."""
     if symbol not in SYMBOLS or freq not in FREQS:
         raise ValueError(f"unknown dataset {symbol}-{freq}")
     key = f"{symbol}-{freq}"
@@ -303,8 +319,9 @@ def load_bars(symbol, freq="1min", start=None, end=None,
             f"{key}.parquet does not match the manifest hash - "
             f"rebuild via 'loader.py build' (never edit parquet in place)")
     df = pd.read_parquet(path)
-    if not _unlocked_full_span and symbol in V1_LOCKED_SYMBOLS:
-        df = df[df["ts"] < pd.Timestamp(TEST_START)]
+    boundary = LOCKED_BOUNDARY.get(symbol)
+    if not _unlocked_full_span and boundary is not None:
+        df = df[df["ts"] < pd.Timestamp(boundary)]
     if start is not None:
         df = df[df["ts"] >= pd.Timestamp(start)]
     if end is not None:

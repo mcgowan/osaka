@@ -1,7 +1,8 @@
 """Tests for the v2 OR-breakout event-builder (Phase 1).
 
 The close-based start / terminate / re-arm / attempt logic and the
-no-reentry label are subtle; these pin them on synthetic days."""
+adverse-reversal label (max_adverse_orw) are subtle; these pin them on
+synthetic days."""
 
 import os
 import sys

@@ -47,7 +47,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from data.loader import load_bars  # noqa: E402
+from data.loader import load_bars, V2_TEST_START  # noqa: E402,F401  (re-export)
 
 OR_BARS = 30            # first 30 min form the OR; OR finalized at minute 30
 CUTOFF_MIN = 330        # 15:00 ET — end of the trader's tradeable entry window
@@ -56,11 +56,11 @@ MIN_OR_BARS = 25        # need this many of the first 30 bars to trust the OR
 REVERSAL_K = 1.0        # FROZEN (trader-ratified 2026-06-14): a breakout
                         # `reversed` iff its adverse give-back >= 1.0 OR-width
 
-# v2 locked-test boundary — RATIFIED 2026-06-14. Days >= this are sealed for the
-# Phase-4 chain economic judge (191 logged trades) and never enter training; the
-# 103 earlier chain-era trades calibrated the label. Fully covered by recorded
-# chains (Dec 2024->); leaves ~16 years of price history for development.
-V2_TEST_START = "2025-07-01"
+# V2_TEST_START (the v2 locked-test boundary) is defined in data.loader, where
+# the STRUCTURAL truncation lives (load_bars/trading_days exclude it by default).
+# RATIFIED 2026-06-14: days >= it are sealed for the Phase-4 chain judge (191
+# logged trades) and never enter training; the 103 earlier chain-era trades
+# calibrated the label. Re-exported above for callers that import it from here.
 
 SIDES = ("up", "down")
 
@@ -81,7 +81,12 @@ def opening_range(day_df):
 def _adverse_orw(up, st_close, st_idx, suf_min_low, suf_max_high, or_width):
     """Max adverse excursion AFTER entry (bar st_idx's close), in OR-width units.
     suf_min_low[i]/suf_max_high[i] are the extreme low/high over bars strictly
-    after i (entry is the close of bar i, so the adverse path starts next bar)."""
+    after i (entry is the close of bar i, so the adverse path starts next bar).
+
+    INTENTIONAL: the scan runs to EOD, NOT to event termination - this models
+    "would I have been stopped after entering here," so a failed event and a
+    later re-break on the same side have overlapping adverse windows by design.
+    Do not "fix" this to stop at the episode boundary."""
     ext = suf_min_low[st_idx] if up else suf_max_high[st_idx]
     if not np.isfinite(ext):                  # entry was the last bar of the day
         return 0.0
@@ -160,9 +165,12 @@ def _ev(day, side, attempt, start_mod, end_mod, n_out, held, oh, ol, ow,
     }
 
 
-def build_events(start=None, end=None):
-    """Build the full event table over SPY (full span unless bounded)."""
-    spy = load_bars("SPY", start=start, end=end)
+def build_events(start=None, end=None, _unlocked_full_span=False):
+    """Build the event table over SPY. By default the loader truncates SPY at
+    V2_TEST_START (structural lock, rule #3), so this returns DEV-only events;
+    the Phase-4 chain judge passes _unlocked_full_span=True (sanctioned)."""
+    spy = load_bars("SPY", start=start, end=end,
+                    _unlocked_full_span=_unlocked_full_span)
     spy["mod"] = _mod(spy["ts"])
     spy["day"] = spy["ts"].dt.strftime("%Y-%m-%d")
     rows = []
@@ -175,9 +183,11 @@ def v2_split(min_gap_days=20, **kw):
     """Day-clustered TRAIN/CALIB/VALID split over the v2 (SPY) dev universe,
     using the same week-grained/embargo machinery as v1 but with the v2 locked
     boundary. Days >= V2_TEST_START are the reserved locked test (the Phase-4
-    economic judge runs there); they never enter the split. min_gap_days set
-    conservatively for the planned multi-day features (finalize at Phase 2;
-    the split's _assert_no_leak enforces it)."""
+    economic judge runs there); they never enter the split (and trading_days now
+    truncates them out anyway). min_gap_days MUST be >= the longest feature
+    lookback; feature-aware callers use breakout_features.split(), which derives
+    it (EMBARGO_DAYS) so it can't drift below a feature's reach. _assert_no_leak
+    enforces the gap but cannot know a feature's true lookback - only this can."""
     from data.loader import trading_days
     from models.splits import make_split
     days = [d for d in trading_days("SPY") if d < V2_TEST_START]

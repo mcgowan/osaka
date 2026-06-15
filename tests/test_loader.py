@@ -78,6 +78,19 @@ def test_locked_test_period_guard():
     assert len(df) > 0
 
 
+def test_spy_locked_at_v2_boundary():
+    from data.loader import V2_TEST_START
+    # SPY truncates structurally at its OWN (earlier) boundary by default
+    df = load_bars("SPY")
+    assert df["ts"].max() < pd.Timestamp(V2_TEST_START)
+    assert trading_days("SPY")[-1] < V2_TEST_START
+    # explicit request for locked dates returns nothing without the escape hatch
+    assert len(load_bars("SPY", start="2025-08-01", end="2025-08-05")) == 0
+    full = load_bars("SPY", start="2025-08-01", end="2025-08-05",
+                     _unlocked_full_span=True)
+    assert len(full) > 0
+
+
 def test_labels_locked_guard():
     from data.labels import load_labels
     from data.loader import TEST_START
