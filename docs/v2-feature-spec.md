@@ -4,6 +4,16 @@
 must match it exactly (drift is a bug — `build()` asserts the column set, and the
 lookahead harness in `tests/test_breakout_features.py` pins point-in-time).
 
+> **PRODUCTION SET (20 features), updated 2026-06-15.** The shipped model uses the
+> **20 SPX-PRICE features only** — blocks 1, 3, and 4 *minus* `vix1d_anchor`,
+> `vix1d_chg`. **Dropped:** block 2 (volume/VWAP — SPX index has no volume, and
+> the features were useless anyway, |corr|<0.06) and the 2 VIX1D features (dead in
+> training). Dropping all 6 cost 0.002 AUC. **Instrument = SPX** (the index is a
+> cleaner signal than the SPY ETF; `docs/v2-results.md` §4). The 26-feature dev
+> set below is the research artifact; `models/walk_forward_train.PROD_FEATURES`
+> is the 20 the production versions train on. The JS port (`docs/v2-model-serving.md`)
+> must implement exactly those 20, computed from SPX bars.
+
 ## Conventions
 
 - **Unit of analysis:** one row per OR-breakout *event* (`data/breakouts.py`),

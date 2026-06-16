@@ -1,9 +1,13 @@
 # v2 Plan — Opening-Range Breakout Conviction Model
 
-**Status:** scoping complete (2026-06-14); data acquisition in progress.
-Companion pivot from v1 (the SPX 0DTE strike-survival model, closed NO-GO —
-see `docs/negative_result.md`). v2 reuses v1's infrastructure and discipline;
-the *question* is new.
+**Status (2026-06-15):** Phases 0–3 complete; Phase 4 evaluation done. Outcome so
+far — **entry use = documented NO-GO** (one-shot economic gate), **exit-override =
+promising** (exploratory), and a late finding that the model should run on **SPX
+(index)**, not SPY (ETF). Full results + honest status in `docs/v2-results.md`.
+7 production model versions built for forward testing in eleuthera
+(`docs/v2-model-serving.md`). Companion pivot from v1 (the SPX 0DTE strike-survival
+model, closed NO-GO — `docs/negative_result.md`); v2 reuses v1's infrastructure
+and discipline, the *question* is new.
 
 ## 1. What this is
 
@@ -66,12 +70,15 @@ signs off each phase). New for v2:
 
 ## 4. Core definitions (frozen)
 
-- **Instrument: SPY** for price, OR levels, volume, and VWAP (IB history to
-  1993, deeper than SPX, and it has volume — which SPX lacks; volume is the
-  whole point). VIX1D + VIX for the vol-regime features. The trade is SPX, but
-  the model uses *relative* features (ATR/range/implied-move units), so SPY↔SPX
-  transfers. ES futures = a later upgrade (overnight + true volume, at the cost
-  of roll engineering); not v2.
+- **Instrument: SPX** (REVISED 2026-06-15 — originally SPY). The model is built
+  on the **SPX index itself**, the traded instrument: osaka's SPX intraday goes
+  back to 2004 (deeper than SPY), there is no SPY→SPX transfer gap, and the index
+  is a materially **cleaner signal** than the SPY ETF — the ETF's 1-min
+  microstructure noise manufactures ~4.5pp of spurious OR-reversals that hurt the
+  label and the model (`docs/v2-results.md` §4). SPY was the original choice for
+  volume + history, but **volume proved useless** (|corr|<0.06, dropped) and SPX
+  is both deeper and cleaner. Features are SPX-price only (no volume, no VIX1D).
+  ES futures = a later upgrade (overnight + true volume); not v2.
 - **Opening range:** high/low of the first 30 min, fixed thereafter.
 - **Breakout event (per side):** starts at the first 1-min **close** outside the
   OR (after OR-finalized); stays alive while no bar closes back inside;
@@ -107,16 +114,16 @@ signs off each phase). New for v2:
 
 ## 5. Features
 
-Reuse v1's point-in-time, harness-tested blocks; add the volume and multi-day
-pieces:
+Reuse v1's point-in-time, harness-tested blocks. **The production set is 20
+SPX-price features** — the volume and VIX1D blocks below were built but **dropped**
+(see `docs/v2-feature-spec.md`); the 26-feature build remains the research artifact.
 - **Breakout state:** extension beyond OR (in ATR/range units), bars since
   break, attempt number, OR width vs ATR, time of day.
-- **Volume / participation (new, SPY):** relative volume vs same-time-of-day
-  baseline, breakout-bar volume, volume trend, VWAP relationship. **(Phase-0 QA:
-  SPY per-minute volume has a strong secular trend — 2008 median ≫ 2024 — so
-  ALL volume features MUST use a trailing-relative baseline, never absolute or
-  full-history-normalized; investigate whether the trend is smooth vs a vendor
-  units step before Phase 2.)**
+- **Volume / participation (built, then DROPPED):** relative volume, breakout-bar
+  volume, volume trend, VWAP relationship. Findings: SPY per-minute volume has a
+  strong secular trend (handled with a trailing-relative baseline), but the
+  features proved **useless** (|corr|<0.06) — and the production instrument SPX
+  (index) has no volume at all. Dropped at ~0 cost.
 - **Today's tape (v1 carryover):** range-so-far, efficiency ratio, persistence,
   open-drive, gap (`gap_atr`) — the "gapped up BIG → toppy" signal.
 - **Multi-day context (the trader's key requirement; mostly v1 carryover +
@@ -187,34 +194,35 @@ no moving them after modeling starts.
 
 ## 8. Phases (gated; trader signs off each)
 
-- **0 — Data:** SPY 1-min (from 2008, resumable) + daily (done, 1996→) from IB;
-  loader extension for SPY+volume; QA (bar counts, volume sanity, half-days).
-- **1 — Event + label + benchmark:** OR-breakout event-builder; success labels;
-  day-clustered split; characterize the 5-bar rule (base rates, hit rate, by
-  regime/time) — the bar to beat.
-- **2 — Features:** the blocks in §5 + lookahead harness; feature QA.
-- **3 — Model:** LightGBM, heavy regularization (effective N = days),
-  walk-forward tuning within TRAIN; per-bar probability; post-hoc calibration on
-  a held-out fold.
-- **4 — Evaluation (two parts):**
-  - *Statistical:* vs 5-bar rule (and trust-everything) on held-out, in the
-    tradeable window; ablations (full-stack replacement; ML-alone vs ML+gates
-    overlap; volume value; multi-day value; feature pruning); honesty check vs
-    option-implied.
-    - *Eval-build notes (from the §7.1 freeze — honor at implementation):*
-      (a) the 5-bar benchmark is **recomputed on whatever rows are being scored**
-      and the PASS bar is `0.83 ×` that live rate — never hard-code 0.395/0.33,
-      so a VALID regime shift can't move the goalposts. (b) The confound guard
-      needs **start-hour strata wired into the slice machinery** (extend the v1
-      NFR-2.1b slices with start-hour; the per-bucket within-strata test is
-      gating, not report-only) — without the strata the guard is just prose.
-  - *Economic (recorded-chain backtest, Dec 2024→):* price the spread P&L of the
-    model's conviction calls on **every breakout including untraded** from
-    `eleuthera/events/` real marks (reuse the v1 chain-marking machinery,
-    `data/chains.contract_quote_asof`); report high- vs low-conviction P&L, the
-    skip-dud-take-later economics, vs the 5-bar rule and trust-everything. This
-    is the dollar judge and the does-the-behavioral-signal-pay honesty check.
-- **5 — Go/no-go** against §7 (both bars). Documented either way.
+*Phase status (2026-06-15): 0–3 ✓ complete, 4 done, 5 = forward (below). Full
+results in `docs/v2-results.md`.*
+
+- **0 — Data ✓:** SPY 1-min (2008→) + daily; SPX 1-min (2004→) + daily; loader
+  extension; QA. (SPX is the production instrument; see §4.)
+- **1 — Event + label + benchmark ✓:** OR-breakout event-builder; adverse-reversal
+  label (K=1.0); day-clustered split; 5-bar benchmark characterized.
+- **2 — Features ✓:** the §5 blocks + lookahead harness + QA; production set
+  trimmed to 20 SPX-price features (volume + VIX1D dropped at ~0 cost).
+- **3 — Model ✓:** LightGBM, heavy regularization; walk-forward-OOF tuned
+  (7 leaves / 1600); isotonic-calibrated. 7 expanding-window quarterly production
+  versions on SPX (`models/walk_forward_train.py`).
+- **4 — Evaluation (done):**
+  - *Statistical:* SPX model beats the 5-bar rule and passes the within-stratum
+    confound guard in dev (morning 0.79, afternoon 0.64); SPY model failed the
+    morning. (`docs/v2-results.md` §2.)
+  - *Economic (one-shot, SPY model):* **entry gate FAILED** (model skips winners;
+    far strike absorbs reversals) → entry = documented NO-GO. **Exit-override**
+    promising (+$96k, exploratory second look). (`docs/v2-results.md` §3.)
+  - *Eval-build notes (honor in any forward eval, from the §7.1 freeze):*
+    (a) recompute the 5-bar benchmark on whatever rows are scored and use `0.83 ×`
+    that live rate — never hard-code 0.395/0.33. (b) Wire start-hour strata into
+    the slice machinery so the confound guard is enforced, not prose.
+- **5 — Go/no-go = FORWARD.** The chain era is now examined, so the clean
+  adjudication of both the (reopened) entry use and the exit override is genuinely
+  forward: deploy the 7 SPX versions in eleuthera, run the exploratory backtest,
+  then run forward on new trades past today with a **fresh** pre-registered
+  criterion. Verdict so far: entry NO-GO (SPY model; reopened by SPX in dev),
+  exit-override promising. (`docs/v2-results.md` §5–6.)
 
 ## 9. What carries over from v1 (the real asset)
 
