@@ -10,7 +10,7 @@
 
 'use strict';
 const path = require('path');
-const { loadModel, predict } = require('./breakout_model');
+const { loadModel, predict, versionForDate } = require('./breakout_model');
 
 const MODELS = path.join(__dirname, '..', 'data', 'processed', 'breakout-models-v2');
 const VERSIONS = ['sep-2024', 'dec-2024', 'mar-2025', 'jun-2025',
@@ -18,6 +18,17 @@ const VERSIONS = ['sep-2024', 'dec-2024', 'mar-2025', 'jun-2025',
 const TOL = 1e-9;
 
 let total = 0, failures = 0;
+
+// version-selection (deploy schedule) boundaries
+for (const [day, exp] of [['2024-09-30', null], ['2024-10-01', 'sep-2024'],
+    ['2024-12-31', 'sep-2024'], ['2025-01-01', 'dec-2024'], ['2025-09-30', 'jun-2025'],
+    ['2026-04-01', 'mar-2026'], ['2026-12-31', 'mar-2026']]) {
+  total++;
+  if (versionForDate(day) !== exp) {
+    failures++; console.error(`  FAIL versionForDate(${day}) = ${versionForDate(day)} != ${exp}`);
+  }
+}
+console.log(`versionForDate: ${failures === 0 ? 'OK' : 'FAIL'}`);
 for (const v of VERSIONS) {
   const model = loadModel(path.join(MODELS, `${v}.json`));
   let vFail = 0;
@@ -34,6 +45,6 @@ for (const v of VERSIONS) {
               `${model.golden.length} golden -> ${vFail === 0 ? 'OK' : vFail + ' FAIL'}`);
 }
 
-console.log(`\n${total - failures}/${total} golden vectors reproduced within ${TOL}`);
+console.log(`\n${total - failures}/${total} checks passed (version-selection + golden vectors to ${TOL})`);
 if (failures) { console.error('FAILED — JS evaluator does not match Python'); process.exit(1); }
 console.log('PASS — JS evaluator matches Python to 1e-9');

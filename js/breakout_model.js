@@ -17,9 +17,52 @@
 
 'use strict';
 const fs = require('fs');
+const path = require('path');
 
 function loadModel(jsonPath) {
   return JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+}
+
+// ── Version selection (walk-forward deploy schedule) ──────────────────────────
+// Each version scores from its deploy date until the next version takes over, so
+// a model never scores a bar it could have trained on. You only ever need ONE
+// model loaded at a time — the one for the current backtest date.
+const DEPLOY = [
+  ['2024-10-01', 'sep-2024'], ['2025-01-01', 'dec-2024'],
+  ['2025-04-01', 'mar-2025'], ['2025-07-01', 'jun-2025'],
+  ['2025-10-01', 'sep-2025'], ['2026-01-01', 'dec-2025'],
+  ['2026-04-01', 'mar-2026'],
+];
+
+// versionForDate('2025-02-14') -> 'dec-2024'.  Returns null before the first
+// deploy date (2024-10-01) — no model is live yet, so don't score.
+function versionForDate(day) {
+  let label = null;
+  for (const [from, v] of DEPLOY) if (day >= from) label = v;
+  return label;
+}
+
+// Full path to the artifact that should score `day`, or null if none is live.
+function modelPathFor(modelsDir, day) {
+  const v = versionForDate(day);
+  return v === null ? null : path.join(modelsDir, `${v}.json`);
+}
+
+// Stateful host that keeps exactly ONE model in memory and swaps it only when
+// the backtest crosses into a new deploy quarter. Use this in a streaming loop:
+//   const host = makeHost('data/processed/breakout-models-v2');
+//   const out = host.scoreAt(bar.day, features);   // null before 2024-10-01
+function makeHost(modelsDir) {
+  let current = null, model = null;
+  return {
+    scoreAt(day, features) {
+      const v = versionForDate(day);
+      if (v === null) return null;
+      if (v !== current) { model = loadModel(path.join(modelsDir, `${v}.json`)); current = v; }
+      return predict(model, features);
+    },
+    get version() { return current; },
+  };
 }
 
 // Walk one tree to its leaf. `x` is the ordered feature-value array.
@@ -67,4 +110,7 @@ function predict(model, features) {
   };
 }
 
-module.exports = { loadModel, predict, leafValue, isotonic };
+module.exports = {
+  loadModel, predict, leafValue, isotonic,
+  versionForDate, modelPathFor, makeHost, DEPLOY,
+};

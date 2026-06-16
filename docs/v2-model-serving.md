@@ -20,6 +20,65 @@ quarter** (it never sees a bar it scores):
 | dec-2025 | 2025-12-31 | Jan–Mar 2026 |
 | mar-2026 | 2026-03-31 | Apr–Jun 2026 |
 
+## Hosting one model at a time
+
+You never load more than **one** model. Each `<label>.json` is fully
+self-contained (~1 MB, ~400 trees), so the pattern is: load the version whose
+deploy window contains the current backtest date, keep using it, and **swap to
+the next file only when the date crosses a quarter boundary.** The 7 files map to
+windows exactly as in the table above:
+
+```
+sep-2024.json → 2024-10-01 .. 2024-12-31      sep-2025.json → 2025-10-01 .. 2025-12-31
+dec-2024.json → 2025-01-01 .. 2025-03-31      dec-2025.json → 2026-01-01 .. 2026-03-31
+mar-2025.json → 2025-04-01 .. 2025-06-30      mar-2026.json → 2026-04-01 .. 2026-06-30 (last)
+jun-2025.json → 2025-07-01 .. 2025-09-30
+```
+
+**Selection rule (in code):** for a bar dated `day`, use the version whose deploy
+date is the latest one `<= day`. `js/breakout_model.js` implements this:
+
+```js
+const { versionForDate, modelPathFor, makeHost } = require('./breakout_model');
+
+versionForDate('2025-02-14');   // 'dec-2024'
+versionForDate('2024-09-15');   // null  — no model live before 2024-10-01
+```
+
+**Recommended: the stateful host** — keeps exactly one model in memory and swaps
+it automatically at quarter boundaries, so you don't re-read the 1 MB file every
+bar:
+
+```js
+const { makeHost } = require('./breakout_model');
+const host = makeHost('data/processed/breakout-models-v2');
+
+for (const breakout of breakouts) {          // your backtest stream, in date order
+  const features = computeFeatures(breakout);          // the 26 SPY features (your port)
+  const out = host.scoreAt(breakout.day, features);    // loads/swaps as needed
+  if (out === null) continue;                          // before 2024-10-01: no model, skip
+  // out = { raw, prob, threshold, flagged }
+  // entry-gate use:  enter only if !out.flagged  (prob <= threshold)
+  // exit-override:   on a stop, hold if the entry-bar prob was <= threshold
+}
+```
+
+**Hosting a single fixed version** (e.g. to score one quarter, or to inspect):
+
+```js
+const { loadModel, predict } = require('./breakout_model');
+const model = loadModel('data/processed/breakout-models-v2/dec-2024.json');
+const { prob, flagged } = predict(model, features);
+```
+
+**Edge cases:**
+- **Before 2024-10-01:** `versionForDate` returns `null` — no version is live yet
+  (the first model trained through Sep-2024). Don't score; fall back to your
+  existing rule.
+- **After 2026-06-30:** `mar-2026` is the last version. For live trading past its
+  window, **retrain** (re-run `models/walk_forward_train.py` with new cutoffs) —
+  do not keep scoring 2026-Q3+ bars with a model trained through Mar-2026.
+
 ## Artifact schema (`<label>.json`)
 
 - `features` — the 26 input names, **in order** (the tree `split_feature` is an
