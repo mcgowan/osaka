@@ -192,6 +192,31 @@ def test_v2_walk_forward_injects_derived_embargo(monkeypatch):
     assert captured.get("min_gap_days") == bf.EMBARGO_DAYS
 
 
+def test_spx_no_volume_branch():
+    # SPX (index) has no volume -> the 4 volume features come out NaN, but the
+    # 20 production price features compute normally.
+    df = build(start="2024-01-01", end="2024-02-29", symbol="SPX")
+    assert len(df) > 0 and df["reversed"].isin([0, 1]).all()
+    for f in ("rel_vol_tod", "vol_surge", "vwap_dist_atr", "vol_trend"):
+        assert df[f].isna().all(), f"{f} should be all-NaN for SPX (no volume)"
+    for f in ("range_atr", "ext_atr", "dist_hi20", "gap_atr"):       # price features
+        assert df[f].notna().mean() > 0.9, f"{f} should be populated for SPX"
+
+
+def test_spx_build_no_future_leakage():
+    # the production path: build SPX features over two windows that differ ONLY
+    # in the end date; every event on the overlapping (earlier) days must get
+    # bit-identical features - i.e. no feature reads data after its own day.
+    long = build(start="2024-01-01", end="2024-04-30", symbol="SPX")
+    short = build(start="2024-01-01", end="2024-03-31", symbol="SPX")
+    key = ["day", "side", "attempt", "start_mod"]
+    j = long.merge(short, on=key, suffixes=("_l", "_s"))
+    assert len(j) > 500, "expected overlapping events to compare"
+    for f in FEATURES:
+        a, b = j[f + "_l"].to_numpy(), j[f + "_s"].to_numpy()
+        assert np.allclose(a, b, equal_nan=True), f"{f} differs by window -> future leakage"
+
+
 def test_load_master_hash_verified_if_built():
     from data.breakout_features import MASTER_MANIFEST, load_master
     if not os.path.exists(MASTER_MANIFEST):
