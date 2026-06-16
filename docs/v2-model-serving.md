@@ -50,6 +50,16 @@ quarter** (it never sees a bar it scores):
 7. **Acceptance:** for each `golden` vector, feeding `x` must reproduce `raw`
    (±1e-9) and `prob`. (The Python build self-checks this; mirror it in JS.)
 
+## Reference implementation (in-repo, proven)
+
+The model evaluator is implemented and tested in JS in this repo:
+- **`js/breakout_model.js`** — `loadModel(path)` + `predict(model, features)`
+  implementing the algorithm above exactly. Drop it into eleuthera (or use as the
+  reference for your own).
+- **`js/test_breakout_model.js`** — loads all 7 artifacts and re-scores their
+  golden vectors; **passes 35/35 to 1e-9** (`node js/test_breakout_model.js`).
+  So the model-eval half is settled; only the feature port remains.
+
 ## Integration risk (do this before trusting it)
 
 The model is now trained **on SPX itself** (osaka's SPX intraday reaches back to
