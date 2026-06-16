@@ -6,23 +6,26 @@
 ## TL;DR
 
 The model predicts, per OR breakout, the probability it **reverses** (gives back
-≥1 OR-width before EOD). The signal is **real** — it beats the 5-bar rule at
-flagging reversals, and on the cleaner SPX index it's materially better than on
-SPY. But against the trader's actual economics it splits sharply:
+≥1 OR-width before EOD). The signal is **real** as a *statistical* object — it
+beats the 5-bar rule at flagging reversals, more so on the cleaner SPX index. But
+against the trader's actual economics it mostly does not pay:
 
-- **As an ENTRY gate: documented NO-GO** (one-shot economic gate, SPY model).
-  The 10-delta short strike sits ~2 OR-widths beyond entry, so ~88% of breakouts
-  win regardless — most "reversals" are shakeouts the far strike absorbs. Using
-  the model to gate entries **destroys P&L** (it skips winners). The reversal
+- **As an ENTRY gate: documented NO-GO** (one-shot economic gate). The 10-delta
+  short strike sits ~2 OR-widths beyond entry, so ~88% of breakouts win regardless
+  — most "reversals" are shakeouts the far strike absorbs. Gating entries
+  **destroys P&L** (it skips winners), on **both** SPY and SPX. The reversal
   signal is economically inert at entry.
-- **As an EXIT override: promising** (exploratory, second look). The trader's
-  premature `risk_off_reversal` stops fire on OR-retreats during VIX-risk spikes,
-  booking losses on shakeouts that would have settled fine. The model's entry
-  conviction **separates shakeouts from genuine reversals**, recovering ~$96k of
-  the over-exit drag in the chain era.
-- **SPX > SPY:** training on the SPX index (not the SPY ETF) is a genuine
-  improvement, not a cosmetic swap — see §4. It reopens the entry question, but
-  only a **forward** test can settle it (the chain era is already examined).
+- **As an EXIT override: narrowly promising, unconfirmed.** The trader's premature
+  `risk_off_reversal` stops fire on OR-retreats during VIX spikes, booking losses
+  on shakeouts that would have settled fine. The model's conviction separates
+  shakeouts from genuine reversals — but this is **SPY-specific** (+$16k 26-feat /
+  +$3k 20-feat; SPX *fails* to reproduce it), exploratory (second look), and
+  volume-sensitive. The one promising use is real but narrow and unsettled.
+- **SPX is a real *dev* improvement but a *dollar* mirage:** SPX beats SPY on dev
+  AUC (cleaner index vs noisy ETF, §4), which briefly reopened the entry question
+  — but the held-out log validation shows the dev edge **does not translate** to
+  P&L (entry still fails; exit is worse on SPX). SPX stays the right instrument
+  for other reasons, just not for log economics. Forward is the only clean test.
 
 ## 1. The model
 
@@ -104,32 +107,56 @@ The exit engine was reproduced and validated to do this: `analysis/exit_replica.
 reproduces the VIX-RSI risk-heat model (armed on 83% of actual `risk_off_reversal`
 exits, off on `sr_inner_breach`/winners).
 
-## 4. SPX (index) > SPY (ETF) — a real finding
+## 4. SPX (index) vs SPY (ETF) — better in dev, but it did NOT translate to the log
 
-Rebuilding on SPX (for the no-transfer-gap + traded-instrument reasons) turned out
-to be a genuine signal improvement, not cosmetic. Evidence it's real, not leakage:
+Rebuilding on SPX (for the no-transfer-gap + traded-instrument reasons) is a
+genuine **development** signal improvement, not cosmetic — and it's not leakage:
 
 - **Lower base rate:** SPX tradeable reversal 35.9% vs SPY 40.5%. The SPY *ETF*
   carries 1-min microstructure noise (bid-ask bounce) the SPX *index* (a smooth
   500-stock average) doesn't — ~4.5pp of **spurious, unpredictable** OR-reversals
-  that dirty the label and drag AUC.
-- **Broad, realistic lift:** SPX OOF AUC runs 0.59→0.76 year-by-year with normal
-  variation — not the uniform 0.9+ of leakage.
-- **No suspicious feature; coherent mechanism.** The morning (noisiest session →
-  most ETF noise) improves most (0.96 → 0.79), exactly as the story predicts.
+  that dirty the label and drag AUC (dev OOF AUC 0.708 vs 0.663).
+- **Broad, realistic lift:** SPX OOF AUC runs 0.59→0.76 year-by-year — not the
+  uniform 0.9+ of leakage. The no-future-leakage harness passes on the SPX path.
+- **Coherent mechanism:** the morning (noisiest → most ETF noise) improves most
+  (dev within-stratum ratio 0.96 → 0.79).
+
+**BUT — the dev advantage did NOT carry to the held-out trading log** (clean
+instrument test, `analysis/spx_frozen_compare.py`; both single dev-trained
+20-feature models, differing only in instrument):
+
+| against the log | SPY | SPX |
+|---|---|---|
+| entry: kept ≥ actual? | FAIL | FAIL (keeps more, still fails) |
+| exit-override (selective) | +$3,038 | **−$13,065** |
+| exit STOP-set recovery (want ≤0) | −$5,212 ✓ | +$10,890 ✗ |
+
+The SPX walk-forward versions agree (`analysis/spx_log_validation.py`: exit
+−$20,625). So SPX's higher dev AUC is a **dev mirage** by the economic measure —
+it does not produce superior dollars on the actual trades, for entry *or* exit.
+The SPX rebuild stays justified on its other merits (no transfer gap, the traded
+instrument, deeper 2004+ history), **not** on log economics. Lesson: dev AUC ≠
+held-out P&L — the discipline of not trusting the dev win was right.
+
+*(Aside, noisy: dropping volume/VIX1D weakened the SPY exit-override too — 26-feat
++$16,448 vs 20-feat +$3,038 — hinting volume may carry some exit-timing signal
+despite useless AUC. Small sample; revisit only if the exit use is pursued.)*
 
 Lesson for v3+: model the **index**, not the ETF, for index-tracking signals.
 
 ## 5. Honest status & the reopened entry question
 
-- **Entry use:** the documented one-shot NO-GO was for the **SPY** model and
-  stands. The **SPX** model is materially stronger (it passes the dev confound
-  guard the SPY model failed), which *reopens* the entry question — but only in
-  **development**. We will **not** re-run the entry gate on the already-examined
-  chain era and declare a pass; that's the iterate-until-it-works pattern the
-  one-shot discipline forbids. The SPX model has earned a clean **forward** shot.
-- **Exit override:** promising but exploratory (second look). Needs forward
-  confirmation too.
+- **Entry use: NO-GO, now on stronger ground.** The one-shot gate killed it for
+  SPY. SPX passes the *dev* confound guard (which briefly reopened the question),
+  but §4's log validation shows that dev edge **does not translate** — SPX still
+  fails the entry gate on real dollars (skips winners). So the entry NO-GO holds
+  across both instruments; the SPX "reopening" was a dev mirage. A forward test
+  could still surprise, but the held-out evidence is now negative for SPX too.
+- **Exit override:** the promising result is **SPY-specific** and exploratory.
+  SPX does *not* reproduce it (exit −$13k vs SPY +$3k/+$16k); and the SPY exit
+  edge weakened when volume was dropped (§4 aside). So the one genuinely
+  promising use is narrow and unconfirmed — it needs a forward test, and the
+  feature set / instrument for it is *not* settled (SPY-with-volume may matter).
 - **Rolling-window versions** (regime-matched, vs the current expanding window)
   are deferred to v3 — a separate experiment, not a v2 retune.
 
