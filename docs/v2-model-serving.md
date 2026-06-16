@@ -22,8 +22,8 @@ quarter** (it never sees a bar it scores):
 
 ## Artifact schema (`<label>.json`)
 
-- `features` — the 20 input names, **in order** (the tree `split_feature` is an
-  index into this list).
+- `features` — the 26 input names, **in order** (the tree `split_feature` is an
+  index into this list). Full set incl. volume/VWAP + VIX1D.
 - `trees` — array of LightGBM tree nodes (`split_feature`, `threshold`,
   `default_left`, `left_child`/`right_child`, or terminal `leaf_value`).
 - `init_offset` — float added to the summed leaf margin.
@@ -34,9 +34,10 @@ quarter** (it never sees a bar it scores):
 
 ## JS evaluation (reproduce exactly — golden vectors are the test)
 
-1. Compute the 20 `features` from the **SPX** bars at the breakout decision bar
-   (close of the first 1-min close outside the OR). Spec: `docs/v2-feature-spec.md`,
-   **excluding** the 4 volume + 2 vix1d features. Missing → `null`.
+1. Compute the 26 `features` from the **SPY** bars (+ VIX1D) at the breakout
+   decision bar (close of the first 1-min close outside the OR). Spec:
+   `docs/v2-feature-spec.md`, the full 26-feature set (incl. volume/VWAP). Match
+   by timestamp to the SPX trade. Missing → `null`.
 2. `x = features.map(f => featureValues[f] ?? null)`.
 3. `margin = init_offset + Σ_trees leaf(tree)`, where `leaf` walks from the root:
    at each node `v = x[split_feature]`; go **left** if `v == null ? default_left
@@ -62,12 +63,12 @@ The model evaluator is implemented and tested in JS in this repo:
 
 ## Integration risk (do this before trusting it)
 
-The model is now trained **on SPX itself** (osaka's SPX intraday reaches back to
-2004), so there is **no SPY→SPX transfer gap** — train and infer are the same
-instrument. The one remaining risk is the **JS feature port**: the 20-feature
-computation in JS must match the harness-tested Python *exactly* — port it with
-its own truncation/golden tests (the model eval above is the easy part; the
-feature math is where bugs hide).
+Trained on **SPY with volume** (the config that performed best for the exit
+use). eleuthera needs a **SPY 1-min feed (with volume) + VIX1D**, computes the 26
+features, and matches by timestamp to its SPX trades (SPY↔SPX ~0.999). Two risks:
+(1) the **JS feature port** — the 26-feature computation must match the
+harness-tested Python *exactly* (port with its own truncation/golden tests); and
+(2) the **SPY→SPX timestamp match** for trade alignment.
 
 ## Honest status
 

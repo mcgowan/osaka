@@ -4,11 +4,10 @@ the eleuthera backtest / forward deployment.
 Each version `V` is trained on ALL data from 2008 through the END of its cutoff
 month, calibrated on the most recent ~3 months (held out, with a feature-lookback
 embargo), and deployed in the backtest for the FOLLOWING quarter (a model never
-scores a bar it trained on). Trained on SPX itself (the traded instrument;
-osaka's SPX intraday reaches back to 2004, deeper than SPY) so there is NO
-SPY->SPX transfer gap - eleuthera computes the same 20 SPX-PRICE features from its
-own bars. SPX has no volume, so the 4 volume features are absent (not in the
-20-feature production set); VIX1D is dropped too.
+scores a bar it trained on). Trained on SPY with the FULL 26-feature set
+(including volume/VWAP) - the config that performed best for the exit-override
+use. eleuthera computes the 26 features from SPY 1-min bars (needs a SPY feed +
+VIX1D) and matches by timestamp to its SPX trades.
 
 Each version is exported BOTH as a Python bundle (booster.txt) and a
 self-contained JSON artifact (trees + isotonic + threshold + ordered features +
@@ -32,9 +31,7 @@ from data.breakout_features import build, FEATURES, EMBARGO_DAYS  # noqa: E402
 from data.loader import OUT_DIR  # noqa: E402
 from models.breakout_gbt import predict, train  # noqa: E402
 
-DROP = {"rel_vol_tod", "vol_surge", "vwap_dist_atr", "vol_trend",
-        "vix1d_anchor", "vix1d_chg"}
-PROD_FEATURES = [f for f in FEATURES if f not in DROP]      # 20 SPX-price features
+PROD_FEATURES = list(FEATURES)              # all 26 incl volume/VWAP (SPY)
 CALIB_MONTHS = 3
 OUT = os.path.join(OUT_DIR, "breakout-models-v2")
 
@@ -109,8 +106,8 @@ def build_version(master, label, cutoff):
 
 def main():
     master = build(start="2008-01-01", end="2026-03-31", _unlocked_full_span=True,
-                   symbol="SPX")           # SPX = the traded instrument; no transfer gap
-    print(f"master {len(master):,} events (SPX); {len(PROD_FEATURES)} prod features\n")
+                   symbol="SPY")           # SPY + volume = best config for the exit use
+    print(f"master {len(master):,} events (SPY); {len(PROD_FEATURES)} features\n")
     print(f"{'version':9} {'booster train span':26} {'bdays':>6} {'cdays':>6} "
           f"{'thr':>6} {'gf':>6}")
     for label, cutoff in CUTOFFS:
