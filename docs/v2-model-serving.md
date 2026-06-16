@@ -3,7 +3,41 @@
 7 expanding-window quarterly versions, built by `models/walk_forward_train.py`,
 in `data/processed/breakout-models-v2/`.
 
-## ⮕ Simplest path for a backtest — precomputed scores (recommended)
+Three ways to get a probability into eleuthera, easiest first. **The first two
+keep all model logic in tested Python** — no JS model, no feature port:
+
+1. **Host the Python model as a service (recommended)** — `serve_model.py`. ↓
+2. **Precomputed lookup table** — a static CSV, if you'd rather not run a service.
+3. **JS evaluator** — only if you want *zero* Python at runtime (requires porting
+   the 26-feature computation to JS; the most work). ↓↓
+
+## ⮕ Host the Python model as a service (recommended)
+
+`serve_model.py` loads the 7 model versions **and** computes the features — all in
+Python — and answers scoring requests over local HTTP. eleuthera just calls it.
+
+**Start it once** (loads the model, ~few seconds, then stays up):
+```
+.venv/bin/python serve_model.py            # -> listening on http://127.0.0.1:8771
+```
+
+**Call it from eleuthera (Node), per breakout your backtest detects:**
+```js
+const q = new URLSearchParams({ day, side, start_et });   // side = 'up'|'down'
+const r = await fetch(`http://127.0.0.1:8771/score?${q}`);// day='YYYY-MM-DD'
+const { p_success } = await r.json();                      // start_et='HH:MM' (ET)
+// p_success = probability the breakout holds to EOD. Use it however you like.
+```
+
+Response: `{ p_success, p_reversed, model_version, matched_start_mod,
+reversal_threshold }`, or `{ error }` (HTTP 404) if no breakout matches. The
+service **auto-selects the correct walk-forward version by date** and matches
+your breakout to the nearest one within 3 minutes (`start_mod=N` minutes-since-
+09:30 also accepted). Covers Oct-2024 → Jun-2026; retrain (re-run the factory)
+for dates past the last version. That's the whole integration — Python hosts the
+model, JS reads one number.
+
+## Precomputed lookup table — static alternative
 
 **You do not need to compute features or run any model code in eleuthera for a
 backtest.** Run `analysis/precompute_scores.py` once; it scores every breakout
