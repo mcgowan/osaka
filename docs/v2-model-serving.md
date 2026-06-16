@@ -1,9 +1,37 @@
 # v2 Model Serving — eleuthera (JS) integration
 
 7 expanding-window quarterly versions, built by `models/walk_forward_train.py`,
-in `data/processed/breakout-models-v2/` (derived/gitignored — regenerate or copy
-to eleuthera). Each `<label>.json` is self-contained; a pure-JS evaluator runs it
-with no Python at trade time.
+in `data/processed/breakout-models-v2/`.
+
+## ⮕ Simplest path for a backtest — precomputed scores (recommended)
+
+**You do not need to compute features or run any model code in eleuthera for a
+backtest.** Run `analysis/precompute_scores.py` once; it scores every breakout
+with the correct point-in-time version and writes a flat lookup table,
+`data/processed/breakout-scores.csv`:
+
+```
+day, side, start_et, start_mod, attempt, model_version, p_success, p_reversed, reversal_threshold
+2024-10-01, down, 10:07, 37, 1, sep-2024, 0.6316, 0.3684, 0.4746
+```
+
+In eleuthera: when your backtest detects a breakout, look up the row by
+**day + side + start time** and read **`p_success`** — the probability the
+breakout holds (= `1 − p_reversed`; the model predicts the chance it *reverses*).
+That's the whole integration: read a CSV, no features, no JS, no Python at
+runtime. The score is point-in-time (only data ≤ the breakout bar) and scored by
+the version that never saw it.
+
+*Granularity:* one score **per breakout**, computed at its **start bar** (the
+first 1-min close outside the OR) — not a probability that updates every bar.
+A bar-by-bar updating probability is a different model we have not built.
+
+---
+
+The rest of this doc covers the **live / in-engine** path (run the model in JS
+per bar), which needs feature computation and is more work — only needed if you
+go beyond a backtest. Each `<label>.json` is self-contained; a pure-JS evaluator
+runs it with no Python at trade time.
 
 ## Deploy schedule (no-lookahead)
 
