@@ -32,6 +32,11 @@ const { p_success } = await r.json();                       // start_et: 'HH:MM'
 `p_success` = the probability the breakout holds to EOD. That's the whole
 integration — one HTTP call, one number.
 
+> **You pass only these 3 identifiers — never bars, volume, or features.** The
+> model uses volume (and 25 other features), but the service reads the SPY data
+> (which includes volume) and computes all 26 features itself. `day`/`side`/
+> `start_et` just tell it *which* breakout to score.
+
 ## 3. Response
 
 ```json
