@@ -4,9 +4,11 @@ the eleuthera backtest / forward deployment.
 Each version `V` is trained on ALL data from 2008 through the END of its cutoff
 month, calibrated on the most recent ~3 months (held out, with a feature-lookback
 embargo), and deployed in the backtest for the FOLLOWING quarter (a model never
-scores a bar it trained on). Production feature set = 20 SPX-PRICE features (no
-volume, no VIX1D), so eleuthera needs no SPY/VIX1D feed at trade time - SPY is
-used only here, offline, for the deep training history.
+scores a bar it trained on). Trained on SPX itself (the traded instrument;
+osaka's SPX intraday reaches back to 2004, deeper than SPY) so there is NO
+SPY->SPX transfer gap - eleuthera computes the same 20 SPX-PRICE features from its
+own bars. SPX has no volume, so the 4 volume features are absent (not in the
+20-feature production set); VIX1D is dropped too.
 
 Each version is exported BOTH as a Python bundle (booster.txt) and a
 self-contained JSON artifact (trees + isotonic + threshold + ordered features +
@@ -106,8 +108,9 @@ def build_version(master, label, cutoff):
 
 
 def main():
-    master = build(start="2008-01-01", end="2026-03-31", _unlocked_full_span=True)
-    print(f"master {len(master):,} events; {len(PROD_FEATURES)} prod features\n")
+    master = build(start="2008-01-01", end="2026-03-31", _unlocked_full_span=True,
+                   symbol="SPX")           # SPX = the traded instrument; no transfer gap
+    print(f"master {len(master):,} events (SPX); {len(PROD_FEATURES)} prod features\n")
     print(f"{'version':9} {'booster train span':26} {'bdays':>6} {'cdays':>6} "
           f"{'thr':>6} {'gf':>6}")
     for label, cutoff in CUTOFFS:

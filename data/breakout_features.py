@@ -248,20 +248,23 @@ def _realized_vol_baseline(spy):
     return base.to_dict()
 
 
-def build(start="2008-01-01", end=None, _unlocked_full_span=False):
+def build(start="2008-01-01", end=None, _unlocked_full_span=False, symbol="SPY"):
     """Assemble the event-bar table (one row per breakout event, scored at its
-    decision bar) with the v2 features + targets. By default the loader truncates
-    SPY at V2_TEST_START, so this is DEV-only; the Phase-4 chain judge passes
-    _unlocked_full_span=True (sanctioned, rule #3)."""
-    events = build_events(start=start, end=end,
+    decision bar) with the v2 features + targets. `symbol` selects the instrument
+    (SPY default; SPX for the v2 production model - SPX has no volume, so the 4
+    volume features come out NaN and are simply not in the 20-feature production
+    set). By default the loader truncates at the symbol's locked boundary; the
+    chain judge / model factory pass _unlocked_full_span=True (sanctioned)."""
+    events = build_events(start=start, end=end, symbol=symbol,
                           _unlocked_full_span=_unlocked_full_span)
-    spy = load_bars("SPY", start=start, end=end,
+    spy = load_bars(symbol, start=start, end=end,
                     _unlocked_full_span=_unlocked_full_span)
+    has_vol = "volume" in spy.columns
     spy["mod"] = _mod(spy["ts"])
     spy["day"] = spy["ts"].dt.strftime("%Y-%m-%d")
     bars_by_day = {d: g for d, g in spy.groupby("day", sort=True)}
 
-    spy_daily = load_bars("SPY", freq="1day",
+    spy_daily = load_bars(symbol, freq="1day",
                           _unlocked_full_span=_unlocked_full_span)
     atr_by_day = _atr14_by_day(spy_daily)
     vix1d_daily = load_bars("VIX1D", freq="1day",
@@ -272,9 +275,14 @@ def build(start="2008-01-01", end=None, _unlocked_full_span=False):
     rv_base = _realized_vol_baseline(spy)
 
     # trailing same-time-of-day volume baseline (pivot day x minute, prior-day roll)
-    vw = spy.pivot_table(index="day", columns="mod", values="volume",
-                         aggfunc="first")
-    tod_base = _tod_volume_baseline(vw)
+    if has_vol:
+        vw = spy.pivot_table(index="day", columns="mod", values="volume",
+                             aggfunc="first")
+        tod_base = _tod_volume_baseline(vw)
+    else:
+        tod_base = None                       # no-volume instrument (SPX)
+    NA_VOL = {"rel_vol_tod": np.nan, "vol_surge": np.nan,
+              "vwap_dist_atr": np.nan, "vol_trend": np.nan}
 
     rows = []
     for day, ev_day in events.groupby("day", sort=True):
@@ -282,7 +290,7 @@ def build(start="2008-01-01", end=None, _unlocked_full_span=False):
         mods = bars["mod"].to_numpy()
         o = bars["open"].to_numpy(); h = bars["high"].to_numpy()
         l = bars["low"].to_numpy(); c = bars["close"].to_numpy()
-        v = bars["volume"].to_numpy()
+        v = bars["volume"].to_numpy() if has_vol else None
         atr = atr_by_day.get(day, np.nan)
         ctx = mctx.get(day)
         if ctx is None:
@@ -293,8 +301,6 @@ def build(start="2008-01-01", end=None, _unlocked_full_span=False):
             si = int(np.searchsorted(mods, ev["start_mod"]))
             if si >= len(mods) or mods[si] != ev["start_mod"]:
                 continue                      # breakout bar not found (gap) - skip
-            tb = (tod_base.at[day, ev["start_mod"]]
-                  if ev["start_mod"] in tod_base.columns else np.nan)
             row = {"day": day, "side": ev["side"], "attempt": ev["attempt"],
                    "start_mod": ev["start_mod"], "tradeable": ev["tradeable"],
                    "reversed": ev["reversed"], "held_to_eod": ev["held_to_eod"],
@@ -302,7 +308,12 @@ def build(start="2008-01-01", end=None, _unlocked_full_span=False):
                    # benchmark only (NOT a feature): the 5-bar rule's greenlight
                    "confirmed_5bar": ev["confirmed_5bar"]}
             row.update(breakout_state(ev, atr))
-            row.update(volume_vwap(o, h, l, c, v, si, atr, tb))
+            if has_vol:
+                tb = (tod_base.at[day, ev["start_mod"]]
+                      if ev["start_mod"] in tod_base.columns else np.nan)
+                row.update(volume_vwap(o, h, l, c, v, si, atr, tb))
+            else:
+                row.update(NA_VOL)
             row.update(tape_features(o, h, l, c, si, atr, ctx["close_y"], rvb))
             row.update(multiday_features(float(c[si]), day_open, ctx))
             rows.append(row)

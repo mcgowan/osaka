@@ -50,15 +50,14 @@ quarter** (it never sees a bar it scores):
 7. **Acceptance:** for each `golden` vector, feeding `x` must reproduce `raw`
    (±1e-9) and `prob`. (The Python build self-checks this; mirror it in JS.)
 
-## Integration risks (do these before trusting it)
+## Integration risk (do this before trusting it)
 
-- **SPY→SPX feature transfer.** The model trains on SPY-computed features and you
-  infer on SPX-computed ones. They're relative/normalized so they transfer
-  (~0.999 corr), but this is **unvalidated** — validate by scoring a few overlap
-  days both ways and confirming the predictions match before relying on it.
-- **JS feature port.** The 20-feature computation must match the harness-tested
-  Python *exactly* — port it with its own truncation/golden tests (the model eval
-  above is the easy part; the feature math is where bugs hide).
+The model is now trained **on SPX itself** (osaka's SPX intraday reaches back to
+2004), so there is **no SPY→SPX transfer gap** — train and infer are the same
+instrument. The one remaining risk is the **JS feature port**: the 20-feature
+computation in JS must match the harness-tested Python *exactly* — port it with
+its own truncation/golden tests (the model eval above is the easy part; the
+feature math is where bugs hide).
 
 ## Honest status
 

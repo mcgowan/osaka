@@ -110,7 +110,8 @@ def day_events(day, day_df):
     closes = post["close"].to_numpy()
     lows = post["low"].to_numpy()
     highs = post["high"].to_numpy()
-    vols = post["volume"].to_numpy()
+    vols = (post["volume"].to_numpy() if "volume" in post.columns
+            else np.full(n, np.nan))     # SPX (index) has no volume
     # suffix extremes over bars strictly after index i (for the adverse scan)
     suf_min_low = np.full(n, np.inf)
     suf_max_high = np.full(n, -np.inf)
@@ -165,11 +166,12 @@ def _ev(day, side, attempt, start_mod, end_mod, n_out, held, oh, ol, ow,
     }
 
 
-def build_events(start=None, end=None, _unlocked_full_span=False):
-    """Build the event table over SPY. By default the loader truncates SPY at
-    V2_TEST_START (structural lock, rule #3), so this returns DEV-only events;
-    the Phase-4 chain judge passes _unlocked_full_span=True (sanctioned)."""
-    spy = load_bars("SPY", start=start, end=end,
+def build_events(start=None, end=None, _unlocked_full_span=False, symbol="SPY"):
+    """Build the event table over `symbol` (SPY default; SPX for the v2 production
+    instrument - it has no volume but the events are price-only). By default the
+    loader truncates at the symbol's locked boundary (rule #3); the chain judge /
+    model factory pass _unlocked_full_span=True (sanctioned)."""
+    spy = load_bars(symbol, start=start, end=end,
                     _unlocked_full_span=_unlocked_full_span)
     spy["mod"] = _mod(spy["ts"])
     spy["day"] = spy["ts"].dt.strftime("%Y-%m-%d")
